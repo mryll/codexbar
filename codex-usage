@@ -1,0 +1,534 @@
+#!/usr/bin/env bash
+# codex-usage — OpenAI Codex plan usage widget for Waybar
+# Reads OAuth credentials from Codex CLI, shows session/weekly/review limits
+# with colored progress bars and Pango markup tooltip.
+#
+# Usage: codex-usage [--format FORMAT] [--tooltip-format FORMAT]
+#
+# Format placeholders:
+#   {plan}              Plan label (e.g. "Plus")
+#   {session_pct}       Session (5h) usage %
+#   {session_reset}     Session countdown (e.g. "1h 30m")
+#   {session_elapsed}   Session time elapsed %
+#   {session_pace}      Session pacing icon (↑ ahead, ↓ under, → on track)
+#   {session_pace_pct}  Session pacing deviation (e.g. "12% ahead")
+#   {weekly_pct}        Weekly usage %
+#   {weekly_reset}      Weekly countdown (e.g. "4d 1h")
+#   {weekly_elapsed}    Weekly time elapsed %
+#   {weekly_pace}       Weekly pacing icon
+#   {weekly_pace_pct}   Weekly pacing deviation
+#   {review_pct}        Code review usage %
+#   {review_reset}      Code review countdown
+#   {credits_balance}   Credits balance
+#   {credits_local}     Approx local messages remaining
+#   {credits_cloud}     Approx cloud messages remaining
+#
+# Default format: "{session_pct}% · {session_reset}"
+
+set -euo pipefail
+
+# --- Parse args ---
+FORMAT="{session_pct}% · {session_reset}"
+TOOLTIP_FORMAT=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --format)
+            [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--format requires a value","class":"critical"}'; exit 0; }
+            FORMAT="$2"; shift 2 ;;
+        --tooltip-format)
+            [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--tooltip-format requires a value","class":"critical"}'; exit 0; }
+            TOOLTIP_FORMAT="$2"; shift 2 ;;
+        *) _o="${1//\\/\\\\}"; _o="${_o//\"/\\\"}"; echo '{"text":"⚠","tooltip":"Unknown option: '"$_o"'","class":"critical"}'; exit 0 ;;
+    esac
+done
+
+CREDS="$HOME/.codex/auth.json"
+API_URL="https://chatgpt.com/backend-api/wham/usage"
+TOKEN_URL="https://auth.openai.com/oauth/token"
+CLIENT_ID="app_EMoamEEZ73f0CkXaXp7hrann" # Codex CLI OAuth client ID
+REFRESH_BUFFER=300 # refresh 5 min before expiry
+CACHE_DIR="$HOME/.cache/codex-usage"
+CACHE_TTL=60 # seconds
+
+# --- Colors (One Dark) ---
+GREEN="#98c379"
+YELLOW="#e5c07b"
+ORANGE="#d19a66"
+RED="#e06c75"
+BLUE="#61afef"
+DIM="#5c6370"
+FG="#abb2bf"
+BAR_EMPTY="#3e4451"
+BAR_LEN=20
+
+# Window durations in seconds
+SESSION_WINDOW=$(( 5 * 3600 ))      # 5 hours
+WEEKLY_WINDOW=$(( 7 * 24 * 3600 ))  # 7 days
+
+# --- Helpers ---
+
+die() {
+    if command -v jq &>/dev/null; then
+        jq -nc --arg t " ⚠" --arg tip "$1" '{text:$t, tooltip:$tip, class:"critical"}'
+    else
+        local _m="${1//\\/\\\\}"; _m="${_m//\"/\\\"}"
+        printf '{"text":" ⚠","tooltip":"%s","class":"critical"}\n' "$_m"
+    fi
+    exit 0
+}
+
+color_for() {
+    local p=$1
+    if   (( p >= 90 )); then printf '%s' "$RED"
+    elif (( p >= 75 )); then printf '%s' "$ORANGE"
+    elif (( p >= 50 )); then printf '%s' "$YELLOW"
+    else printf '%s' "$GREEN"
+    fi
+}
+
+make_bar() {
+    local p=$1 color=$2
+    local filled=$(( p * BAR_LEN / 100 ))
+    (( filled > BAR_LEN )) && filled=$BAR_LEN
+    local empty=$(( BAR_LEN - filled ))
+    local f="" e=""
+    printf -v f '%*s' "$filled" ''; f="${f// /█}"
+    printf -v e '%*s' "$empty"  ''; e="${e// /░}"
+    printf "%s" "<span foreground='${color}'>${f}</span><span foreground='${BAR_EMPTY}'>${e}</span>"
+}
+
+# Convert unix timestamp to countdown string
+countdown() {
+    local ts=$1
+    [[ -z "$ts" || "$ts" == "0" || "$ts" == "null" ]] && { echo "—"; return; }
+    local now diff d h m
+    now=$(date +%s)
+    diff=$(( ts - now ))
+    (( diff <= 0 )) && { echo "now"; return; }
+    d=$(( diff / 86400 ))
+    h=$(( diff % 86400 / 3600 ))
+    m=$(( diff % 3600 / 60 ))
+    if (( d > 0 )); then
+        echo "${d}d ${h}h"
+    else
+        printf '%dh %02dm' "$h" "$m"
+    fi
+}
+
+# Calculate time elapsed % and pacing for a usage window
+# Args: usage_pct reset_at_unix window_duration_seconds
+# Outputs: elapsed_pct pace_icon pace_label
+calc_pacing() {
+    local usage_pct=$1 reset_at=$2 window_s=$3
+    local elapsed_pct=0 pace_icon="→" pace_label="on track"
+
+    if [[ -n "$reset_at" && "$reset_at" != "0" && "$reset_at" != "null" ]]; then
+        local now_epoch secs_left
+        now_epoch=$(date +%s)
+        secs_left=$(( reset_at - now_epoch ))
+        elapsed_pct=$(( (window_s - secs_left) * 100 / window_s ))
+        (( elapsed_pct < 0 )) && elapsed_pct=0
+        (( elapsed_pct > 100 )) && elapsed_pct=100
+
+        if (( elapsed_pct > 0 )); then
+            local pacing_x100=$(( usage_pct * 100 / elapsed_pct ))
+            if (( pacing_x100 > 105 )); then
+                local dev=$(( pacing_x100 - 100 ))
+                pace_icon="↑"
+                pace_label="${dev}% ahead"
+            elif (( pacing_x100 < 95 )); then
+                local dev=$(( 100 - pacing_x100 ))
+                pace_icon="↓"
+                pace_label="${dev}% under"
+            fi
+        fi
+    fi
+
+    echo "${elapsed_pct} ${pace_icon} ${pace_label}"
+}
+
+# Decode JWT payload (base64url → JSON)
+jwt_decode() {
+    local token=$1 payload pad
+    payload=$(echo "$token" | cut -d. -f2)
+    pad=$(( 4 - ${#payload} % 4 ))
+    (( pad < 4 )) && payload+=$(printf '%*s' "$pad" '' | tr ' ' '=')
+    payload="${payload//-/+}"
+    payload="${payload//_//}"
+    echo "$payload" | base64 -d 2>/dev/null
+}
+
+jwt_exp() { jwt_decode "$1" | jq -r '.exp // 0'; }
+
+# --- Pre-checks ---
+for cmd in curl jq date base64; do
+    command -v "$cmd" &>/dev/null || die "Missing dependency: $cmd"
+done
+[[ -f "$CREDS" ]] || die "No credentials.\nRun <b>codex login</b> to log in."
+
+# --- Read credentials ---
+creds=$(<"$CREDS")
+jq -e . <<< "$creds" &>/dev/null || die "Invalid credentials file.\nRun <b>codex login</b> to log in."
+access_token=$(jq -r '.tokens.access_token // empty' <<< "$creds")
+refresh_token=$(jq -r '.tokens.refresh_token // empty' <<< "$creds")
+account_id=$(jq -r '.tokens.account_id // empty' <<< "$creds")
+
+[[ -n "$access_token" ]] || die "No token.\nRun <b>codex login</b> to log in."
+
+# Extract plan type from id_token JWT claims
+id_token_raw=$(jq -r '.tokens.id_token // empty' <<< "$creds")
+plan_type="unknown"
+if [[ -n "$id_token_raw" ]]; then
+    _pt=$(jwt_decode "$id_token_raw" | jq -r '."https://api.openai.com/auth".chatgpt_plan_type // empty')
+    [[ -n "$_pt" ]] && plan_type="$_pt"
+fi
+
+# --- Token refresh if needed ---
+now_s=$(date +%s)
+expires_s=$(jwt_exp "$access_token")
+auth_ok=true
+syncing=false
+
+# Helper: refresh token, fetch usage, write cache (used by background sync)
+_do_refresh_and_fetch() {
+    local _resp _at _nr _idt _tmp _usage
+    for (( _try=1; _try<=3; _try++ )); do
+        sleep 2
+        _resp=$(curl -sf --max-time 5 -X POST "$TOKEN_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"client_id\":\"${CLIENT_ID}\",\"grant_type\":\"refresh_token\",\"refresh_token\":\"${refresh_token}\",\"scope\":\"openid profile email\"}") || true
+        if [[ -n "$_resp" ]] && jq -e '.access_token' <<< "$_resp" &>/dev/null; then
+            _at=$(jq -r '.access_token // empty' <<< "$_resp")
+            _nr=$(jq -r '.refresh_token // empty' <<< "$_resp")
+            _idt=$(jq -r '.id_token // empty' <<< "$_resp")
+            _tmp=$(mktemp)
+            local _now_iso
+            _now_iso=$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)
+            jq --arg at "${_at:-$access_token}" \
+               --arg rt "${_nr:-$refresh_token}" \
+               --arg idt "${_idt:-$id_token_raw}" \
+               --arg lr "$_now_iso" \
+               '.tokens.access_token=$at | .tokens.refresh_token=$rt | .tokens.id_token=$idt | .last_refresh=$lr' \
+                "$CREDS" > "$_tmp" && mv "$_tmp" "$CREDS"
+            local _acc_id="${account_id}"
+            [[ -z "$_acc_id" ]] && _acc_id=$(jq -r '.tokens.account_id // empty' "$CREDS")
+            local _curl_args=(-sf --max-time 10 "$API_URL" -H "Authorization: Bearer ${_at:-$access_token}")
+            [[ -n "$_acc_id" ]] && _curl_args+=(-H "chatgpt-account-id: $_acc_id")
+            _usage=$(curl "${_curl_args[@]}") || true
+            if [[ -n "$_usage" ]] && jq -e '.rate_limit' <<< "$_usage" &>/dev/null; then
+                mkdir -p "$CACHE_DIR"
+                local _ctmp
+                _ctmp=$(mktemp "$CACHE_DIR/.usage.XXXXXX")
+                printf '%s' "$_usage" > "$_ctmp" && mv "$_ctmp" "$CACHE_DIR/usage.json"
+                rm -f "$CACHE_DIR/.stale"
+            fi
+            return 0
+        fi
+    done
+    return 1
+}
+
+if (( expires_s < now_s + REFRESH_BUFFER )); then
+    # Quick attempt (3s timeout)
+    resp=$(curl -sf --max-time 3 -X POST "$TOKEN_URL" \
+        -H "Content-Type: application/json" \
+        -d "{\"client_id\":\"${CLIENT_ID}\",\"grant_type\":\"refresh_token\",\"refresh_token\":\"${refresh_token}\",\"scope\":\"openid profile email\"}") || true
+
+    if [[ -n "$resp" ]] && jq -e '.access_token' <<< "$resp" &>/dev/null; then
+        new_at=$(jq -r '.access_token // empty' <<< "$resp")
+        new_rt=$(jq -r '.refresh_token // empty' <<< "$resp")
+        new_idt=$(jq -r '.id_token // empty' <<< "$resp")
+        now_iso=$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)
+
+        [[ -n "$new_at" ]] && access_token="$new_at"
+
+        tmp=$(mktemp)
+        jq --arg at "${new_at:-$access_token}" \
+           --arg rt "${new_rt:-$refresh_token}" \
+           --arg idt "${new_idt:-$id_token_raw}" \
+           --arg lr "$now_iso" \
+           '.tokens.access_token=$at | .tokens.refresh_token=$rt | .tokens.id_token=$idt | .last_refresh=$lr' \
+           "$CREDS" > "$tmp" && mv "$tmp" "$CREDS"
+    else
+        # Quick attempt failed — retry in background
+        _do_refresh_and_fetch &>/dev/null &
+        auth_ok=false
+        syncing=true
+    fi
+fi
+
+# --- Fetch usage (with cache) ---
+mkdir -p "$CACHE_DIR"
+cache_file="$CACHE_DIR/usage.json"
+stale_marker="$CACHE_DIR/.stale"
+
+use_cache=false
+if [[ -f "$cache_file" ]]; then
+    cache_age=$(( $(date +%s) - $(date -r "$cache_file" +%s) ))
+    (( cache_age < CACHE_TTL )) && use_cache=true
+fi
+
+if [[ "$use_cache" == "true" ]]; then
+    usage=$(<"$cache_file")
+elif [[ "$auth_ok" == "false" ]]; then
+    if [[ -f "$cache_file" ]]; then
+        stale_age=$(( $(date +%s) - $(date -r "$cache_file" +%s) ))
+        if (( stale_age > SESSION_WINDOW )); then
+            rm -f "$cache_file" "$stale_marker"
+            if [[ "$syncing" == "true" ]]; then
+                jq -nc '{text:" ↻", tooltip:"Syncing with Codex...", class:"low"}'
+                exit 0
+            fi
+            die "Session expired.\nRun <b>codex login</b> to re-login."
+        fi
+        usage=$(<"$cache_file")
+        if [[ "$syncing" != "true" ]] && [[ ! -f "$stale_marker" ]]; then
+            touch "$stale_marker"
+            command -v notify-send &>/dev/null && \
+                notify-send -u normal -i dialog-warning \
+                    "Codex Usage" "Session expired. Run <b>codex login</b> to re-login." 2>/dev/null || true
+        fi
+    else
+        if [[ "$syncing" == "true" ]]; then
+            jq -nc '{text:" ↻", tooltip:"Syncing with Codex...", class:"low"}'
+            exit 0
+        fi
+        die "Session expired.\nRun <b>codex login</b> to re-login."
+    fi
+else
+    _fetch_args=(-sf --max-time 10 "$API_URL" -H "Authorization: Bearer $access_token")
+    [[ -n "$account_id" ]] && _fetch_args+=(-H "chatgpt-account-id: $account_id")
+    usage=$(curl "${_fetch_args[@]}") || true
+
+    if [[ -n "$usage" ]] && jq -e '.rate_limit' <<< "$usage" &>/dev/null; then
+        _ctmp=$(mktemp "$CACHE_DIR/.usage.XXXXXX")
+        printf '%s' "$usage" > "$_ctmp" && mv "$_ctmp" "$cache_file"
+        rm -f "$stale_marker"
+        # Update plan_type from API response if available
+        _api_plan=$(jq -r '.plan_type // empty' <<< "$usage")
+        [[ -n "$_api_plan" ]] && plan_type="$_api_plan"
+    elif [[ -f "$cache_file" ]]; then
+        usage=$(<"$cache_file")
+        touch "$stale_marker"
+    else
+        die "API request failed.\nCheck your connection."
+    fi
+fi
+
+# --- Parse windows ---
+session_pct=$(jq -r '(.rate_limit.primary_window.used_percent // 0) | floor' <<< "$usage")
+session_reset_at=$(jq -r '.rate_limit.primary_window.reset_at // 0' <<< "$usage")
+weekly_pct=$(jq -r '(.rate_limit.secondary_window.used_percent // 0) | floor' <<< "$usage")
+weekly_reset_at=$(jq -r '.rate_limit.secondary_window.reset_at // 0' <<< "$usage")
+
+# Code review
+has_review=$(jq '.code_review_rate_limit != null and .code_review_rate_limit.primary_window != null' <<< "$usage")
+review_pct=0
+review_reset_at=0
+if [[ "$has_review" == "true" ]]; then
+    review_pct=$(jq -r '(.code_review_rate_limit.primary_window.used_percent // 0) | floor' <<< "$usage")
+    review_reset_at=$(jq -r '.code_review_rate_limit.primary_window.reset_at // 0' <<< "$usage")
+fi
+
+# Credits
+credits_balance=$(jq -r '.credits.balance // "0"' <<< "$usage")
+has_credits=$(jq -r '.credits.has_credits // false' <<< "$usage")
+credits_unlimited=$(jq -r '.credits.unlimited // false' <<< "$usage")
+credits_local_lo=$(jq -r '.credits.approx_local_messages[0] // 0' <<< "$usage")
+credits_local_hi=$(jq -r '.credits.approx_local_messages[1] // 0' <<< "$usage")
+credits_cloud_lo=$(jq -r '.credits.approx_cloud_messages[0] // 0' <<< "$usage")
+credits_cloud_hi=$(jq -r '.credits.approx_cloud_messages[1] // 0' <<< "$usage")
+
+# Format credits local/cloud as range strings
+if (( credits_local_lo == credits_local_hi )); then
+    credits_local="${credits_local_lo}"
+else
+    credits_local="${credits_local_lo}–${credits_local_hi}"
+fi
+if (( credits_cloud_lo == credits_cloud_hi )); then
+    credits_cloud="${credits_cloud_lo}"
+else
+    credits_cloud="${credits_cloud_lo}–${credits_cloud_hi}"
+fi
+
+# --- Plan label ---
+plan="${plan_type^}"
+# Also check API response for plan_type
+_api_plan=$(jq -r '.plan_type // empty' <<< "$usage" 2>/dev/null) || true
+[[ -n "$_api_plan" ]] && plan="${_api_plan^}"
+
+# --- Pacing ---
+_s_pace=$(calc_pacing "$session_pct" "$session_reset_at" "$SESSION_WINDOW")
+read -r session_elapsed session_pace _discard <<< "$_s_pace"
+session_pace_pct=$(cut -d' ' -f3- <<< "$_s_pace")
+
+_w_pace=$(calc_pacing "$weekly_pct" "$weekly_reset_at" "$WEEKLY_WINDOW")
+read -r weekly_elapsed weekly_pace _discard <<< "$_w_pace"
+weekly_pace_pct=$(cut -d' ' -f3- <<< "$_w_pace")
+
+# --- Waybar class ---
+max_pct=$session_pct
+(( weekly_pct > max_pct )) && max_pct=$weekly_pct
+
+class=""
+if   (( max_pct >= 90 )); then class="critical"
+elif (( max_pct >= 75 )); then class="high"
+elif (( max_pct >= 50 )); then class="mid"
+else class="low"
+fi
+
+# --- Apply format placeholders ---
+# Compute countdowns once
+s_cd_val=$(countdown "$session_reset_at")
+w_cd_val=$(countdown "$weekly_reset_at")
+r_cd_val=""
+[[ "$has_review" == "true" ]] && r_cd_val=$(countdown "$review_reset_at")
+
+apply_format() {
+    local text="$1"
+    text="${text//\{icon\}/}"
+    text="${text//\{plan\}/$plan}"
+    text="${text//\{session_pct\}/$session_pct}"
+    text="${text//\{session_reset\}/$s_cd_val}"
+    text="${text//\{session_elapsed\}/$session_elapsed}"
+    text="${text//\{session_pace\}/$session_pace}"
+    text="${text//\{session_pace_pct\}/$session_pace_pct}"
+    text="${text//\{weekly_pct\}/$weekly_pct}"
+    text="${text//\{weekly_reset\}/$w_cd_val}"
+    text="${text//\{weekly_elapsed\}/$weekly_elapsed}"
+    text="${text//\{weekly_pace\}/$weekly_pace}"
+    text="${text//\{weekly_pace_pct\}/$weekly_pace_pct}"
+    text="${text//\{review_pct\}/$review_pct}"
+    text="${text//\{review_reset\}/$r_cd_val}"
+    text="${text//\{credits_balance\}/$credits_balance}"
+    text="${text//\{credits_local\}/$credits_local}"
+    text="${text//\{credits_cloud\}/$credits_cloud}"
+    printf '%s' "$text"
+}
+
+# Add sync/stale indicator
+stale_icon=""
+if [[ "$syncing" == "true" ]]; then
+    stale_icon=" ↻"
+elif [[ -f "$stale_marker" ]]; then
+    stale_icon=" ⏸"
+fi
+
+bar_text=$(apply_format "$FORMAT")${stale_icon}
+
+# --- Tooltip ---
+if [[ -n "$TOOLTIP_FORMAT" ]]; then
+    t=$(apply_format "$TOOLTIP_FORMAT")
+else
+    # Default rich Pango tooltip
+    s_color=$(color_for "$session_pct")
+    w_color=$(color_for "$weekly_pct")
+    s_bar=$(make_bar "$session_pct" "$s_color")
+    w_bar=$(make_bar "$weekly_pct" "$w_color")
+    s_cd="$s_cd_val"
+    w_cd="$w_cd_val"
+
+    NL=$'\n'
+    B="<span foreground='${BLUE}'>"
+    E="</span>"
+
+    strip_tags() { sed 's/<[^>]*>//g' <<< "$1"; }
+
+    # Collect all content lines into an array
+    lines=()
+    lines+=("CENTER<span font_weight='bold' foreground='${BLUE}'>Codex ${plan}</span>")
+    lines+=("SEP")
+    lines+=("")
+    lines+=(" <span foreground='${FG}'>  󰔟  Session</span>            <span font_weight='bold' foreground='${s_color}'>${session_pct}%</span>")
+    lines+=("   ${s_bar}")
+    lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${s_cd}</span>")
+    lines+=("")
+    lines+=(" <span foreground='${FG}'>  󰃰  Weekly</span>             <span font_weight='bold' foreground='${w_color}'>${weekly_pct}%</span>")
+    lines+=("   ${w_bar}")
+    lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${w_cd}</span>")
+
+    if [[ "$has_review" == "true" ]]; then
+        r_color=$(color_for "$review_pct")
+        r_bar=$(make_bar "$review_pct" "$r_color")
+        r_cd=$(countdown "$review_reset_at")
+        lines+=("")
+        lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>       <span font_weight='bold' foreground='${r_color}'>${review_pct}%</span>")
+        lines+=("   ${r_bar}")
+        lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${r_cd}</span>")
+    fi
+
+    if [[ "$has_credits" == "true" ]]; then
+        lines+=("")
+        lines+=("SEP")
+        lines+=(" <span foreground='${FG}'>  󰄑  Credits balance</span>  <span font_weight='bold' foreground='${FG}'>${credits_balance}</span>")
+        if [[ "$credits_local" != "0" ]]; then
+            lines+=(" <span foreground='${DIM}'>  󰀓  Local msgs: ~${credits_local}</span>")
+        fi
+        if [[ "$credits_cloud" != "0" ]]; then
+            lines+=(" <span foreground='${DIM}'>  󰏗  Cloud msgs: ~${credits_cloud}</span>")
+        fi
+    fi
+
+    # Calculate max width from content
+    max_w=0
+    for line in "${lines[@]}"; do
+        [[ "$line" == "SEP" ]] && continue
+        [[ "$line" == CENTER* ]] && line="${line#CENTER}"
+        plain=$(strip_tags "$line")
+        (( ${#plain} > max_w )) && max_w=${#plain}
+    done
+    INNER_W=$(( max_w + 1 ))
+
+    pad() {
+        local content="$1"
+        local plain=$(strip_tags "$content")
+        local len=${#plain}
+        local need=$(( INNER_W - len ))
+        (( need < 0 )) && need=0
+        local sp=""
+        printf -v sp '%*s' "$need" ''
+        printf '%s%s' "$content" "$sp"
+    }
+
+    center_pad() {
+        local content="$1"
+        local plain=$(strip_tags "$content")
+        local len=${#plain}
+        local total=$(( INNER_W - len ))
+        (( total < 0 )) && total=0
+        local lp=$(( total / 2 )) rp=$(( total - total / 2 ))
+        local ls="" rs=""
+        printf -v ls '%*s' "$lp" ''
+        printf -v rs '%*s' "$rp" ''
+        printf '%s%s%s' "$ls" "$content" "$rs"
+    }
+
+    L() { printf '%s' "${B}│${E}$(pad "$1")${B}│${E}"; }
+    LC() { printf '%s' "${B}│${E}$(center_pad "$1")${B}│${E}"; }
+
+    # Build separator dynamically
+    sep=""
+    printf -v sep '%*s' "$(( INNER_W - 2 ))" ''; sep="${sep// /─}"
+    sep=" <span foreground='${DIM}'>${sep}</span>"
+
+    border_h=""
+    printf -v border_h '%*s' "$INNER_W" ''; border_h="${border_h// /─}"
+
+    # Render tooltip
+    t=""
+    t+="${B}╭${border_h}╮${E}${NL}"
+    for line in "${lines[@]}"; do
+        if [[ "$line" == "SEP" ]]; then
+            t+="$(L "$sep")${NL}"
+        elif [[ "$line" == CENTER* ]]; then
+            t+="$(LC "${line#CENTER}")${NL}"
+        else
+            t+="$(L "$line")${NL}"
+        fi
+    done
+    t+="${B}╰${border_h}╯${E}"
+fi
+
+# --- Output waybar JSON ---
+jq -nc --arg text "$bar_text" --arg tooltip "$t" --arg class "$class" \
+    '{text:$text, tooltip:$tooltip, class:$class}'
