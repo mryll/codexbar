@@ -20,8 +20,9 @@ Waybar widget that displays your OpenAI Codex subscription usage — session (5h
 
 - [Codex CLI](https://github.com/openai/codex) (`codex login` for authentication)
 - `curl`, `jq`, GNU `date`, `base64` (standard on most Linux distros)
-- A [Nerd Font](https://www.nerdfonts.com/) for icons
-- Waybar
+- A [Nerd Font](https://www.nerdfonts.com/) for tooltip icons
+- [Waybar](https://github.com/Alexays/Waybar)
+- (Optional) [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF for the OpenAI brand icon
 
 ## Install
 
@@ -44,8 +45,9 @@ Add to your Waybar config:
 ```jsonc
 "modules-right": ["custom/codex-usage", ...],
 
+// Without icon (default)
 "custom/codex-usage": {
-    "exec": "~/.local/bin/codex-usage",
+    "exec": "codex-usage",
     "return-type": "json",
     "interval": 60,
     "tooltip": true,
@@ -53,7 +55,55 @@ Add to your Waybar config:
 }
 ```
 
-### CSS Styling
+### Adding an icon
+
+You can add any icon via waybar's `format` field. The `{}` placeholder is replaced with the widget text.
+
+**No icon** (default):
+
+```jsonc
+"custom/codex-usage": {
+    "exec": "codex-usage",
+    "return-type": "json",
+    "interval": 60,
+    "tooltip": true,
+    "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
+}
+// => 42% · 1h 30m
+```
+
+**Nerd Font icon** (any Nerd Font glyph):
+
+```jsonc
+"custom/codex-usage": {
+    "exec": "codex-usage",
+    "format": " {}",
+    "return-type": "json",
+    "interval": 60,
+    "tooltip": true,
+    "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
+}
+// =>  42% · 1h 30m
+```
+
+**OpenAI brand icon** (requires [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF):
+
+```jsonc
+"custom/codex-usage": {
+    "exec": "codex-usage",
+    "format": "<span font='Font Awesome 7 Brands'>\ue7cf</span> {}",
+    "return-type": "json",
+    "interval": 60,
+    "tooltip": true,
+    "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
+}
+```
+
+> **Note:** On Arch Linux, install the OTF package (`sudo pacman -S otf-font-awesome`).
+> The WOFF2 variant (`woff2-font-awesome`) does not render in Waybar due to a
+> [Pango compatibility issue](https://github.com/Alexays/Waybar/issues/4381).
+
+### CSS styling (optional)
 
 ```css
 #custom-codex-usage {
@@ -92,7 +142,7 @@ codex-usage --tooltip-format 'Session: {session_pct}% | Weekly: {weekly_pct}%'
 
 | Placeholder | Description | Example |
 |---|---|---|
-| `{icon}` | Codex icon (empty) | |
+| `{icon}` | Codex icon (Nerd Font) | `` |
 | `{plan}` | Plan label | `Plus` |
 | `{session_pct}` | Session (5h) usage % | `42` |
 | `{session_reset}` | Session countdown | `1h 30m` |
