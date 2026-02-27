@@ -369,6 +369,7 @@ weekly_pace_pct=$(cut -d' ' -f3- <<< "$_w_pace")
 # --- Waybar class ---
 max_pct=$session_pct
 (( weekly_pct > max_pct )) && max_pct=$weekly_pct
+(( review_pct > max_pct )) && max_pct=$review_pct
 
 class=""
 if   (( max_pct >= 90 )); then class="critical"
