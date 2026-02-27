@@ -1,4 +1,4 @@
-# waybar-codex-usage
+# codexbar
 
 Waybar widget that displays your OpenAI Codex subscription usage — session (5h) limit, weekly limit, code review limit, and credits — with colored progress bars and countdown timers.
 
@@ -34,8 +34,8 @@ make install PREFIX=~/.local
 sudo make install
 
 # Or just copy
-cp codex-usage ~/.local/bin/
-chmod +x ~/.local/bin/codex-usage
+cp codexbar ~/.local/bin/
+chmod +x ~/.local/bin/codexbar
 ```
 
 ## Waybar Configuration
@@ -43,11 +43,11 @@ chmod +x ~/.local/bin/codex-usage
 Add to your Waybar config:
 
 ```jsonc
-"modules-right": ["custom/codex-usage", ...],
+"modules-right": ["custom/codexbar", ...],
 
 // Without icon (default)
-"custom/codex-usage": {
-    "exec": "codex-usage",
+"custom/codexbar": {
+    "exec": "codexbar",
     "return-type": "json",
     "interval": 60,
     "tooltip": true,
@@ -62,8 +62,8 @@ You can add any icon via waybar's `format` field. The `{}` placeholder is replac
 **No icon** (default):
 
 ```jsonc
-"custom/codex-usage": {
-    "exec": "codex-usage",
+"custom/codexbar": {
+    "exec": "codexbar",
     "return-type": "json",
     "interval": 60,
     "tooltip": true,
@@ -75,8 +75,8 @@ You can add any icon via waybar's `format` field. The `{}` placeholder is replac
 **Nerd Font icon** (any Nerd Font glyph):
 
 ```jsonc
-"custom/codex-usage": {
-    "exec": "codex-usage",
+"custom/codexbar": {
+    "exec": "codexbar",
     "format": " {}",
     "return-type": "json",
     "interval": 60,
@@ -89,8 +89,8 @@ You can add any icon via waybar's `format` field. The `{}` placeholder is replac
 **OpenAI brand icon** (requires [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF):
 
 ```jsonc
-"custom/codex-usage": {
-    "exec": "codex-usage",
+"custom/codexbar": {
+    "exec": "codexbar",
     "format": "<span font='Font Awesome 7 Brands'>\ue7cf</span> {}",
     "return-type": "json",
     "interval": 60,
@@ -106,24 +106,24 @@ You can add any icon via waybar's `format` field. The `{}` placeholder is replac
 ### CSS styling (optional)
 
 ```css
-#custom-codex-usage {
+#custom-codexbar {
     margin: 0 8px;
     font-size: 11px;
 }
 
-#custom-codex-usage.low {
+#custom-codexbar.low {
     color: #98c379;
 }
 
-#custom-codex-usage.mid {
+#custom-codexbar.mid {
     color: #e5c07b;
 }
 
-#custom-codex-usage.high {
+#custom-codexbar.high {
     color: #d19a66;
 }
 
-#custom-codex-usage.critical {
+#custom-codexbar.critical {
     color: #e06c75;
 }
 ```
@@ -132,10 +132,10 @@ You can add any icon via waybar's `format` field. The `{}` placeholder is replac
 
 ```bash
 # Bar text format
-codex-usage --format '{session_pct}% · {weekly_pct}%'
+codexbar --format '{session_pct}% · {weekly_pct}%'
 
 # Tooltip format (plain text, replaces Pango tooltip)
-codex-usage --tooltip-format 'Session: {session_pct}% | Weekly: {weekly_pct}%'
+codexbar --tooltip-format 'Session: {session_pct}% | Weekly: {weekly_pct}%'
 ```
 
 ### Available Placeholders
@@ -159,6 +159,47 @@ codex-usage --tooltip-format 'Session: {session_pct}% | Weekly: {weekly_pct}%'
 | `{credits_balance}` | Credits balance | `0` |
 | `{credits_local}` | Approx local messages | `10–15` |
 | `{credits_cloud}` | Approx cloud messages | `5–8` |
+
+### Pacing indicators
+
+Pacing compares your actual usage against where you "should" be if you spread your quota evenly across the window. It answers: "at this rate, will I run out before the window resets?"
+
+- **↑** -- ahead of pace (using faster than sustainable)
+- **→** -- on track
+- **↓** -- under pace (plenty of room left)
+
+**How it works:** if 30% of the session time has elapsed, you "should" have used ~30% of your quota. The widget divides your actual usage by the expected usage and flags deviations beyond a tolerance band:
+
+| Scenario | Time elapsed | Usage | Pacing | Icon |
+|---|---|---|---|---|
+| Burning through quota | 25% | 60% | 140% ahead | ↑ |
+| Slightly ahead | 50% | 52% | on track (within tolerance) | → |
+| Perfectly even | 50% | 50% | on track | → |
+| Conserving | 70% | 30% | 57% under | ↓ |
+
+By default the tolerance is **±5%** -- deviations of 5% or less show as "on track" to avoid noise. `--pace-tolerance` accepts a non-negative integer (e.g. 0–50). You can tune it like this:
+
+```bash
+# More sensitive (±2%) -- flags smaller deviations
+codexbar --pace-tolerance 2
+
+# More relaxed (±10%) -- only flags large deviations
+codexbar --pace-tolerance 10
+
+# Default (±5%)
+codexbar
+```
+
+In your waybar config:
+
+```jsonc
+"custom/codexbar": {
+    "exec": "codexbar --pace-tolerance 3",
+    "return-type": "json",
+    "interval": 60,
+    "tooltip": true
+}
+```
 
 ## How It Works
 
