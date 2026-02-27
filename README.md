@@ -26,6 +26,14 @@ Waybar widget that displays your OpenAI Codex subscription usage — session (5h
 
 ## Install
 
+### Arch Linux (AUR)
+
+```bash
+yay -S codexbar
+```
+
+### From source
+
 ```bash
 # User-local
 make install PREFIX=~/.local
