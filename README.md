@@ -65,46 +65,26 @@ Add to your Waybar config:
 
 ### Adding an icon
 
-You can add any icon via waybar's `format` field. The `{}` placeholder is replaced with the widget text.
+Use `--icon` to prepend an icon to the widget text. The icon inherits the same color as the usage text.
 
-**No icon** (default):
+**Emoji:**
 
 ```jsonc
-"custom/codexbar": {
-    "exec": "codexbar",
-    "return-type": "json",
-    "interval": 60,
-    "tooltip": true,
-    "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
-}
-// => 42% · 1h 30m
+"exec": "codexbar --icon '🤖'"
+// => 🤖 42% · 1h 30m
 ```
 
-**Nerd Font icon** (any Nerd Font glyph):
+**Nerd Font glyph:**
 
 ```jsonc
-"custom/codexbar": {
-    "exec": "codexbar",
-    "format": " {}",
-    "return-type": "json",
-    "interval": 60,
-    "tooltip": true,
-    "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
-}
+"exec": "codexbar --icon ''"
 // =>  42% · 1h 30m
 ```
 
 **OpenAI brand icon** (requires [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF):
 
 ```jsonc
-"custom/codexbar": {
-    "exec": "codexbar",
-    "format": "<span font='Font Awesome 7 Brands'>\ue7cf</span> {}",
-    "return-type": "json",
-    "interval": 60,
-    "tooltip": true,
-    "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
-}
+"exec": "codexbar --icon \"<span font='Font Awesome 7 Brands'>&#xe7cf;</span>\""
 ```
 
 > **Note:** On Arch Linux, install the OTF package (`sudo pacman -S otf-font-awesome`).
