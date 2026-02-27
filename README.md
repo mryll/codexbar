@@ -111,30 +111,29 @@ You can add any icon via waybar's `format` field. The `{}` placeholder is replac
 > The WOFF2 variant (`woff2-font-awesome`) does not render in Waybar due to a
 > [Pango compatibility issue](https://github.com/Alexays/Waybar/issues/4381).
 
-### CSS styling (optional)
+### Colors
 
-```css
-#custom-codexbar {
-    margin: 0 8px;
-    font-size: 11px;
-}
+The bar text is colored by severity level out of the box (One Dark palette):
 
-#custom-codexbar.low {
-    color: #98c379;
-}
+| Class | Range | Default color |
+|---|---|---|
+| `low` | 0-49% | `#98c379` (green) |
+| `mid` | 50-74% | `#e5c07b` (yellow) |
+| `high` | 75-89% | `#d19a66` (orange) |
+| `critical` | 90-100% | `#e06c75` (red) |
 
-#custom-codexbar.mid {
-    color: #e5c07b;
-}
+To override, pass `--color-*` flags in the `exec` field:
 
-#custom-codexbar.high {
-    color: #d19a66;
-}
-
-#custom-codexbar.critical {
-    color: #e06c75;
+```jsonc
+"custom/codexbar": {
+    "exec": "codexbar --color-low '#50fa7b' --color-critical '#ff5555'",
+    ...
 }
 ```
+
+Available flags: `--color-low`, `--color-mid`, `--color-high`, `--color-critical`.
+
+CSS classes (`low`, `mid`, `high`, `critical`) are also emitted for additional styling via `~/.config/waybar/style.css`.
 
 ## Custom Formats
 
