@@ -4,6 +4,7 @@
 # with colored progress bars and Pango markup tooltip.
 #
 # Usage: codexbar [--format FORMAT] [--tooltip-format FORMAT] [--pace-tolerance N]
+#                  [--color-low HEX] [--color-mid HEX] [--color-high HEX] [--color-critical HEX]
 #
 # Format placeholders:
 #   {plan}              Plan label (e.g. "Plus")
@@ -484,7 +485,7 @@ apply_format() {
 # Add sync/stale indicator
 stale_icon=""
 if [[ "$syncing" == "true" ]]; then
-    stale_icon="↻"
+    stale_icon=" ↻"
 elif [[ -f "$stale_marker" ]]; then
     stale_icon=" ⏸"
 fi
@@ -497,6 +498,7 @@ case "$class" in
     mid)      bar_fg="$BAR_COLOR_MID" ;;
     high)     bar_fg="$BAR_COLOR_HIGH" ;;
     critical) bar_fg="$BAR_COLOR_CRITICAL" ;;
+    *)        bar_fg="$BAR_COLOR_LOW" ;;
 esac
 bar_text="<span foreground='${bar_fg}'>${bar_text}</span>"
 

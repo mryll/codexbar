@@ -149,7 +149,6 @@ codexbar --tooltip-format 'Session: {session_pct}% | Weekly: {weekly_pct}%'
 
 | Placeholder | Description | Example |
 |---|---|---|
-| `{icon}` | Codex icon (Nerd Font) | `` |
 | `{plan}` | Plan label | `Plus` |
 | `{session_pct}` | Session (5h) usage % | `42` |
 | `{session_reset}` | Session countdown | `1h 30m` |
