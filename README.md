@@ -77,8 +77,8 @@ Use `--icon` to prepend an icon to the widget text. The icon inherits the same c
 **Nerd Font glyph:**
 
 ```jsonc
-"exec": "codexbar --icon ''"
-// =>  42% · 1h 30m
+"exec": "codexbar --icon '󰚩'"
+// => 󰚩 42% · 1h 30m
 ```
 
 **OpenAI brand icon** (requires [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF):
