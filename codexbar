@@ -531,12 +531,12 @@ else
     lines+=("CENTER<span font_weight='bold' foreground='${BLUE}'>Codex ${plan}</span>")
     lines+=("SEP")
     lines+=("")
-    lines+=(" <span foreground='${FG}'>  󰔟  Session</span>            <span font_weight='bold' foreground='${s_color}'>${session_pct}% ${session_pace}</span>")
-    lines+=("   ${s_bar}")
+    lines+=(" <span foreground='${FG}'>  󰔟  Session</span>")
+    lines+=("   ${s_bar}  <span font_weight='bold' foreground='${s_color}'>${session_pct}% ${session_pace}</span>")
     lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${s_cd}</span>")
     lines+=("")
-    lines+=(" <span foreground='${FG}'>  󰃰  Weekly</span>             <span font_weight='bold' foreground='${w_color}'>${weekly_pct}% ${weekly_pace}</span>")
-    lines+=("   ${w_bar}")
+    lines+=(" <span foreground='${FG}'>  󰃰  Weekly</span>")
+    lines+=("   ${w_bar}  <span font_weight='bold' foreground='${w_color}'>${weekly_pct}% ${weekly_pace}</span>")
     lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${w_cd}</span>")
 
     if [[ "$has_review" == "true" ]]; then
@@ -544,8 +544,8 @@ else
         r_bar=$(make_bar "$review_pct" "$r_color")
         r_cd=$(countdown "$review_reset_at")
         lines+=("")
-        lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>       <span font_weight='bold' foreground='${r_color}'>${review_pct}%</span>")
-        lines+=("   ${r_bar}")
+        lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>")
+        lines+=("   ${r_bar}  <span font_weight='bold' foreground='${r_color}'>${review_pct}%</span>")
         lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${r_cd}</span>")
     fi
 

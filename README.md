@@ -58,6 +58,7 @@ Add to your Waybar config:
     "exec": "codexbar",
     "return-type": "json",
     "interval": 60,
+    "signal": 12,
     "tooltip": true,
     "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
 }
@@ -183,6 +184,7 @@ In your waybar config:
     "exec": "codexbar --pace-tolerance 3",
     "return-type": "json",
     "interval": 60,
+    "signal": 12,
     "tooltip": true
 }
 ```
