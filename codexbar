@@ -302,7 +302,7 @@ _do_refresh_and_fetch() {
                 local _ctmp
                 _ctmp=$(mktemp "$CACHE_DIR/.usage.XXXXXX")
                 printf '%s' "$_usage" > "$_ctmp" && mv "$_ctmp" "$CACHE_DIR/usage.json"
-                rm -f "$CACHE_DIR/.stale"
+                rm -f "$CACHE_DIR/.stale" "$CACHE_DIR/.last_error"
             fi
             pkill -RTMIN+12 waybar 2>/dev/null || true
             return 0
@@ -360,7 +360,7 @@ _fetch_usage() {
         if [[ -f "$cache_file" ]]; then
             stale_age=$(( $(date +%s) - $(date -r "$cache_file" +%s) ))
             if (( stale_age > SESSION_WINDOW )); then
-                rm -f "$cache_file" "$stale_marker"
+                rm -f "$cache_file" "$stale_marker" "$CACHE_DIR/.last_error"
                 if [[ "$syncing" == "true" ]]; then
                     jq -nc '{text:"↻", tooltip:"Syncing with Codex...", class:"low"}'
                     exit 0
@@ -368,6 +368,7 @@ _fetch_usage() {
                 die "Session expired.\nRun <b>codex login</b> to re-login."
             fi
             usage=$(<"$cache_file")
+            rm -f "$CACHE_DIR/.last_error"
             if [[ "$syncing" != "true" ]] && [[ ! -f "$stale_marker" ]]; then
                 touch "$stale_marker"
                 command -v notify-send &>/dev/null && \
@@ -382,20 +383,28 @@ _fetch_usage() {
             die "Session expired.\nRun <b>codex login</b> to re-login."
         fi
     else
-        _fetch_args=(-sf --max-time 10 "$API_URL" -H "Authorization: Bearer $access_token")
+        _http_code=""
+        _resp_body=""
+        _fetch_args=(-s --max-time 10 -w $'\n%{http_code}' "$API_URL" -H "Authorization: Bearer $access_token")
         [[ -n "$account_id" ]] && _fetch_args+=(-H "chatgpt-account-id: $account_id")
-        usage=$(curl "${_fetch_args[@]}") || true
+        _resp_body=$(curl "${_fetch_args[@]}") || true
+        _http_code="${_resp_body##*$'\n'}"
+        _resp_body="${_resp_body%$'\n'"$_http_code"}"
 
-        if [[ -n "$usage" ]] && jq -e '.rate_limit' <<< "$usage" &>/dev/null; then
+        if [[ "$_http_code" == "200" ]] && [[ -n "$_resp_body" ]] && jq -e '.rate_limit' <<< "$_resp_body" &>/dev/null; then
+            usage="$_resp_body"
             _ctmp=$(mktemp "$CACHE_DIR/.usage.XXXXXX")
             printf '%s' "$usage" > "$_ctmp" && mv "$_ctmp" "$cache_file"
-            rm -f "$stale_marker"
+            rm -f "$stale_marker" "$CACHE_DIR/.last_error"
             # Update plan_type from API response if available
             _api_plan=$(jq -r '.plan_type // empty' <<< "$usage")
             [[ -n "$_api_plan" ]] && plan_type="$_api_plan"
         elif [[ -f "$cache_file" ]]; then
             usage=$(<"$cache_file")
             touch "$stale_marker"
+            # Persist error details for tooltip
+            _err_msg=$(jq -r '.error.message // empty' <<< "$_resp_body" 2>/dev/null) || true
+            printf '%s\n%s' "$_http_code" "$_err_msg" > "$CACHE_DIR/.last_error"
         else
             die "API request failed.\nCheck your connection."
         fi
@@ -570,6 +579,25 @@ else
         fi
         if [[ "$credits_cloud" != "0" ]]; then
             lines+=(" <span foreground='${DIM}'>  󰏗  Cloud msgs: ~${credits_cloud}</span>")
+        fi
+    fi
+
+    # API error info (if stale)
+    if [[ -f "$CACHE_DIR/.last_error" ]]; then
+        _le_code="" _le_msg=""
+        { read -r _le_code || true; read -r _le_msg || true; } < "$CACHE_DIR/.last_error" 2>/dev/null || true
+        if [[ -n "$_le_code" ]] && [[ "$_le_code" =~ ^[0-9]+$ ]]; then
+            _le_msg=$(sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<< "$_le_msg")
+            if (( _le_code >= 500 )); then
+                _err_icon="󰅚" _err_color="$RED"
+            else
+                _err_icon="󰀪" _err_color="$ORANGE"
+            fi
+            lines+=("")
+            lines+=("SEP")
+            _err_line=" <span foreground='${_err_color}'>  ${_err_icon}  HTTP ${_le_code}</span>"
+            [[ -n "$_le_msg" ]] && _err_line+="<span foreground='${DIM}'> — ${_le_msg}</span>"
+            lines+=("$_err_line")
         fi
     fi
 
