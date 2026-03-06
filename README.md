@@ -1,5 +1,8 @@
 # codexbar
 
+[![AUR version](https://img.shields.io/aur/version/codexbar)](https://aur.archlinux.org/packages/codexbar)
+[![License: MIT](https://img.shields.io/github/license/mryll/codexbar)](LICENSE)
+
 Waybar widget that displays your OpenAI Codex subscription usage — session (5h) limit, weekly limit, code review limit, and credits — with colored progress bars and countdown timers.
 
 ![screenshot](screenshot.png)
@@ -220,6 +223,23 @@ In your waybar config:
 4. Caches responses for 60 seconds
 5. Outputs JSON for Waybar: `{text, tooltip, class}`
 
+## Troubleshooting
+
+| Bar shows | Meaning | Fix |
+|---|---|---|
+| `↻` | Syncing | Normal at boot -- data appears on next refresh |
+| `⚠` | Auth error | Run `codex login` to authenticate |
+| `⚠` | Token expired | Run `codex login` to re-authenticate |
+| `⚠` | API error | Check your internet connection |
+| Nothing | Module not loaded | Check waybar config and restart waybar |
+
 ## License
 
 MIT
+
+## Related
+
+- [claudebar](https://github.com/mryll/claudebar) -- Claude AI usage widget for Waybar
+- [meteobar](https://github.com/mryll/meteobar) -- Weather widget for Waybar (Open-Meteo)
+- [logibar](https://github.com/mryll/logibar) -- Logitech battery widgets for Waybar
+- [Waybar](https://github.com/Alexays/Waybar) -- Status bar for Wayland compositors
