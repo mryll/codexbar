@@ -16,18 +16,20 @@ Waybar widget that displays your OpenAI Codex subscription usage — session (5h
 - Colored severity levels (green → yellow → orange → red)
 - Rich Pango tooltip with box-drawing borders
 - Token auto-refresh with background sync
-- 60s cache to reduce API calls
+- Response cache (60s TTL) — fast even on multi-monitor setups
 - Graceful fallback on network errors
+- Pure Bash — no runtime dependencies beyond `curl`, `jq`, GNU `date`, and `base64`
+- Works with any Waybar setup (Hyprland, Sway, etc.)
 
-## Prerequisites
+## Requirements
 
-- [Codex CLI](https://github.com/openai/codex) (`codex login` for authentication)
+- [Codex CLI](https://github.com/openai/codex) — must be logged in (`codex login`)
 - `curl`, `jq`, GNU `date`, `base64` (standard on most Linux distros)
-- A [Nerd Font](https://www.nerdfonts.com/) for tooltip icons
 - [Waybar](https://github.com/Alexays/Waybar)
+- A [Nerd Font](https://www.nerdfonts.com/) for tooltip icons
 - (Optional) [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF for the OpenAI brand icon
 
-## Install
+## Installation
 
 ### Arch Linux (AUR)
 
@@ -38,25 +40,37 @@ yay -S codexbar
 ### From source
 
 ```bash
-# User-local
+git clone https://github.com/mryll/codexbar.git
+cd codexbar
 make install PREFIX=~/.local
-
-# System-wide
-sudo make install
-
-# Or just copy
-cp codexbar ~/.local/bin/
-chmod +x ~/.local/bin/codexbar
 ```
 
-## Waybar Configuration
+Or system-wide:
 
-Add to your Waybar config:
+```bash
+sudo make install
+```
+
+To uninstall:
+
+```bash
+make uninstall PREFIX=~/.local
+```
+
+### Quick install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mryll/codexbar/main/codexbar \
+  -o ~/.local/bin/codexbar && chmod +x ~/.local/bin/codexbar
+```
+
+## Quick start
+
+Add the module to your `~/.config/waybar/config.jsonc`:
 
 ```jsonc
 "modules-right": ["custom/codexbar", ...],
 
-// Without icon (default)
 "custom/codexbar": {
     "exec": "codexbar",
     "return-type": "json",
@@ -67,7 +81,9 @@ Add to your Waybar config:
 }
 ```
 
-### Adding an icon
+## Configuration
+
+### Icon
 
 Use `--icon` to prepend an icon to the widget text. The icon inherits the same color as the usage text.
 
@@ -91,9 +107,8 @@ Use `--icon` to prepend an icon to the widget text. The icon inherits the same c
 "exec": "codexbar --icon \"<span font='Font Awesome 7 Brands'>&#xe7cf;</span>\""
 ```
 
-> **Note:** On Arch Linux, install the OTF package (`sudo pacman -S otf-font-awesome`).
-> The WOFF2 variant (`woff2-font-awesome`) does not render in Waybar due to a
-> [Pango compatibility issue](https://github.com/Alexays/Waybar/issues/4381).
+> [!NOTE]
+> On Arch Linux, install the OTF package (`sudo pacman -S otf-font-awesome`). The WOFF2 variant (`woff2-font-awesome`) does not render in Waybar due to a [Pango compatibility issue](https://github.com/Alexays/Waybar/issues/4381).
 
 ### Colors
 
@@ -101,10 +116,10 @@ The bar text is colored by severity level out of the box (One Dark palette):
 
 | Class | Range | Default color |
 |---|---|---|
-| `low` | 0-49% | `#98c379` (green) |
-| `mid` | 50-74% | `#e5c07b` (yellow) |
-| `high` | 75-89% | `#d19a66` (orange) |
-| `critical` | 90-100% | `#e06c75` (red) |
+| `low` | 0–49% | `#98c379` (green) |
+| `mid` | 50–74% | `#e5c07b` (yellow) |
+| `high` | 75–89% | `#d19a66` (orange) |
+| `critical` | 90–100% | `#e06c75` (red) |
 
 To override, pass `--color-*` flags in the `exec` field:
 
@@ -119,7 +134,7 @@ Available flags: `--color-low`, `--color-mid`, `--color-high`, `--color-critical
 
 CSS classes (`low`, `mid`, `high`, `critical`) are also emitted for additional styling via `~/.config/waybar/style.css`.
 
-### Theming (Omarchy Users)
+### Theming (Omarchy)
 
 Tooltip and bar text colors are automatically read from the active [Omarchy](https://github.com/basecamp/omarchy) theme at `~/.config/omarchy/current/theme/colors.toml` on every execution. On non-Omarchy systems, the One Dark palette is used as fallback.
 
@@ -129,30 +144,48 @@ The priority chain is: **CLI flags** (`--color-*`) > **Omarchy theme** > **One D
 |:---:|:---:|:---:|
 | ![Tokyo Night](screenshots/tokyo-night.png) | ![Gruvbox](screenshots/gruvbox.png) | ![Catppuccin Latte](screenshots/catppuccin-latte.png) |
 
-### Spacing
+### Format customization
 
-Adjust `padding` (space **inside** the widget, between border and content) and `margin` (space **outside** the widget, between the widget and its neighbors) in your `~/.config/waybar/style.css`:
-
-```css
-#custom-codexbar {
-    padding: 0 8px;   /* top/bottom: 0, left/right: 8px */
-    margin: 0 4px;    /* top/bottom: 0, left/right: 4px */
-}
-```
-
-Waybar uses standard CSS shorthand order — `top right bottom left` (clockwise). With 2 values: first = top/bottom, second = left/right.
-
-## Custom Formats
+Use `--format` to control the bar text:
 
 ```bash
-# Bar text format
-codexbar --format '{session_pct}% · {weekly_pct}%'
+# Default (session usage + countdown)
+codexbar
+# => 42% · 1h 30m
 
-# Tooltip format (plain text, replaces Pango tooltip)
+# Session + weekly
+codexbar --format '{session_pct}% · {weekly_pct}%'
+# => 42% · 27%
+
+# With pacing indicator
+codexbar --format '{session_pct}% {session_pace} · {session_reset}'
+# => 42% ↑ · 1h 30m
+
+# Minimal
+codexbar --format '{session_pct}%'
+# => 42%
+```
+
+Use `--tooltip-format` for a custom plain-text tooltip (overrides the default rich tooltip):
+
+```bash
 codexbar --tooltip-format 'Session: {session_pct}% | Weekly: {weekly_pct}%'
 ```
 
-### Available Placeholders
+Example Waybar config with custom format:
+
+```jsonc
+"custom/codexbar": {
+    "exec": "codexbar --format '{session_pct}% {session_pace}'",
+    "return-type": "json",
+    "interval": 300,
+    "signal": 12,
+    "tooltip": true,
+    "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
+}
+```
+
+#### Available placeholders
 
 | Placeholder | Description | Example |
 |---|---|---|
@@ -177,9 +210,9 @@ codexbar --tooltip-format 'Session: {session_pct}% | Weekly: {weekly_pct}%'
 
 Pacing compares your actual usage against where you "should" be if you spread your quota evenly across the window. It answers: "at this rate, will I run out before the window resets?"
 
-- **↑** -- ahead of pace (using faster than sustainable)
-- **→** -- on track
-- **↓** -- under pace (plenty of room left)
+- **↑** — ahead of pace (using faster than sustainable)
+- **→** — on track
+- **↓** — under pace (plenty of room left)
 
 **How it works:** if 30% of the session time has elapsed, you "should" have used ~30% of your quota. The widget divides your actual usage by the expected usage and flags deviations beyond a tolerance band:
 
@@ -190,32 +223,30 @@ Pacing compares your actual usage against where you "should" be if you spread yo
 | Perfectly even | 50% | 50% | on track | → |
 | Conserving | 70% | 30% | 57% under | ↓ |
 
-By default the tolerance is **±5%** -- deviations of 5% or less show as "on track" to avoid noise. `--pace-tolerance` accepts a non-negative integer (e.g. 0–50). You can tune it like this:
+By default the tolerance is **±5%** — deviations of 5% or less show as "on track" to avoid noise. You can tune it with `--pace-tolerance`:
 
 ```bash
-# More sensitive (±2%) -- flags smaller deviations
+# More sensitive (±2%) — flags smaller deviations
 codexbar --pace-tolerance 2
 
-# More relaxed (±10%) -- only flags large deviations
+# More relaxed (±10%) — only flags large deviations
 codexbar --pace-tolerance 10
-
-# Default (±5%)
-codexbar
 ```
 
-In your waybar config:
+The `{session_pace_pct}` / `{weekly_pace_pct}` placeholders show the deviation (e.g. "12% ahead", "5% under", "on track").
 
-```jsonc
-"custom/codexbar": {
-    "exec": "codexbar --pace-tolerance 3",
-    "return-type": "json",
-    "interval": 300,
-    "signal": 12,
-    "tooltip": true
+### Spacing
+
+Adjust `padding` (inside the widget) and `margin` (outside the widget) in `~/.config/waybar/style.css`:
+
+```css
+#custom-codexbar {
+    padding: 0 8px;
+    margin: 0 4px;
 }
 ```
 
-## How It Works
+## How it works
 
 1. Reads OAuth tokens from `~/.codex/auth.json` (created by `codex login`)
 2. Auto-refreshes expired tokens via OpenAI's OAuth endpoint
@@ -227,19 +258,15 @@ In your waybar config:
 
 | Bar shows | Meaning | Fix |
 |---|---|---|
-| `↻` | Syncing | Normal at boot -- data appears on next refresh |
+| `↻` | Syncing | Normal at boot — data appears on next refresh |
 | `⚠` | Auth error | Run `codex login` to authenticate |
 | `⚠` | Token expired | Run `codex login` to re-authenticate |
 | `⚠` | API error | Check your internet connection |
-| Nothing | Module not loaded | Check waybar config and restart waybar |
-
-## License
-
-MIT
+| Nothing | Module not loaded | Check Waybar config and restart Waybar |
 
 ## Related
 
-- [claudebar](https://github.com/mryll/claudebar) -- Claude AI usage widget for Waybar
-- [meteobar](https://github.com/mryll/meteobar) -- Weather widget for Waybar (Open-Meteo)
-- [logibar](https://github.com/mryll/logibar) -- Logitech battery widgets for Waybar
-- [Waybar](https://github.com/Alexays/Waybar) -- Status bar for Wayland compositors
+- [claudebar](https://github.com/mryll/claudebar) — Claude AI usage widget for Waybar
+- [logibar](https://github.com/mryll/logibar) — Logitech battery widgets for Waybar
+- [meteobar](https://github.com/mryll/meteobar) — Weather widget for Waybar (Open-Meteo)
+- [Waybar](https://github.com/Alexays/Waybar) — Status bar for Wayland compositors
