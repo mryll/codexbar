@@ -12,7 +12,8 @@ Waybar widget that displays your OpenAI Codex subscription usage — session (5h
 - Session (5h) and weekly usage with progress bars
 - Code review usage tracking
 - Credits balance display
-- Pacing indicators (ahead/under/on track)
+- Pacing indicators — ratio-based and point-based, with optional per-window coloring
+- Tooltip elapsed markers — visual pacing reference in progress bars
 - Colored severity levels (green → yellow → orange → red)
 - Rich Pango tooltip with box-drawing borders
 - Token auto-refresh with background sync
@@ -193,15 +194,30 @@ Example Waybar config with custom format:
 | `{session_pct}` | Session (5h) usage % | `42` |
 | `{session_reset}` | Session countdown | `1h 30m` |
 | `{session_elapsed}` | Session time elapsed % | `58` |
-| `{session_pace}` | Pacing icon | `↑` / `↓` / `→` |
-| `{session_pace_pct}` | Pacing deviation | `12% ahead` |
+| `{session_pace}` | Session pacing icon (ratio-based) | `↑` / `↓` / `→` |
+| `{session_pace_indicator}` | Session pacing icon (point-based) | `↑` / `↓` / `→` |
+| `{session_pace_pct}` | Session pacing deviation (ratio) | `12% ahead` |
+| `{session_pace_pts}` | Session pacing deviation (points) | `5pts ahead` |
+| `{session_pace_delta}` | Session pacing delta (signed) | `-12` |
+| `{session_pace_abs_delta}` | Session pacing delta (unsigned) | `12` |
 | `{weekly_pct}` | Weekly usage % | `27` |
 | `{weekly_reset}` | Weekly countdown | `4d 1h` |
 | `{weekly_elapsed}` | Weekly elapsed % | `42` |
-| `{weekly_pace}` | Pacing icon | `↑` / `↓` / `→` |
-| `{weekly_pace_pct}` | Pacing deviation | `5% under` |
+| `{weekly_pace}` | Weekly pacing icon (ratio-based) | `↑` / `↓` / `→` |
+| `{weekly_pace_indicator}` | Weekly pacing icon (point-based) | `↑` / `↓` / `→` |
+| `{weekly_pace_pct}` | Weekly pacing deviation (ratio) | `5% under` |
+| `{weekly_pace_pts}` | Weekly pacing deviation (points) | `8pts under` |
+| `{weekly_pace_delta}` | Weekly pacing delta (signed) | `-8` |
+| `{weekly_pace_abs_delta}` | Weekly pacing delta (unsigned) | `8` |
 | `{review_pct}` | Code review usage % | `4` |
 | `{review_reset}` | Code review countdown | `6d 23h` |
+| `{review_elapsed}` | Code review time elapsed % | `42` |
+| `{review_pace}` | Code review pacing icon (ratio-based) | `↑` / `↓` / `→` |
+| `{review_pace_indicator}` | Code review pacing icon (point-based) | `↑` / `↓` / `→` |
+| `{review_pace_pct}` | Code review pacing deviation (ratio) | `3% ahead` |
+| `{review_pace_pts}` | Code review pacing deviation (points) | `3pts ahead` |
+| `{review_pace_delta}` | Code review pacing delta (signed) | `3` |
+| `{review_pace_abs_delta}` | Code review pacing delta (unsigned) | `3` |
 | `{credits_balance}` | Credits balance | `0` |
 | `{credits_local}` | Approx local messages | `10–15` |
 | `{credits_cloud}` | Approx cloud messages | `5–8` |
@@ -234,6 +250,57 @@ codexbar --pace-tolerance 10
 ```
 
 The `{session_pace_pct}` / `{weekly_pace_pct}` placeholders show the deviation (e.g. "12% ahead", "5% under", "on track").
+
+#### Point-based pacing
+
+In addition to ratio-based pacing, there's a point-based alternative that computes `actual_usage - expected_usage`. At 22% usage with 78% elapsed, the delta is -56 -- intuitive and stable across the window.
+
+| Placeholder | Type | Example | Description |
+|---|---|---|---|
+| `{*_pace}` | Ratio | ↑ | Icon with tolerance band (±5% default) |
+| `{*_pace_indicator}` | Points | ↑ | Icon without tolerance (any non-zero = ↑/↓) |
+| `{*_pace_pct}` | Ratio | 12% ahead | Ratio-based deviation label |
+| `{*_pace_pts}` | Points | 5pts ahead | Point-based deviation label |
+| `{*_pace_delta}` | Points | -12 | Signed integer delta |
+| `{*_pace_abs_delta}` | Points | 12 | Unsigned integer delta |
+
+Replace `*` with `session`, `weekly`, or `review`.
+
+### Per-window pace coloring
+
+Use `--format-pace-color` to color pace placeholders individually per window based on their point delta, instead of the global usage-based color:
+
+```bash
+codexbar --format-pace-color \
+  --format '{session_pace_indicator}{session_pace_abs_delta}·{weekly_pace_indicator}{weekly_pace_abs_delta}'
+# => ↑4·↓10  (↑4 in orange, ↓10 in green, · in neutral)
+```
+
+| Delta | Color | Meaning |
+|---|---|---|
+| ≤ -10 | Green | Well under pace |
+| -10 to 0 | Yellow | Slightly under or on pace |
+| 1 to 9 | Orange | Slightly ahead |
+| ≥ 10 | Red | Burning fast |
+
+Without this flag, the entire bar text is colored by usage percentage -- identical to the default behavior.
+
+### Tooltip elapsed markers
+
+Use `--tooltip-pace-pts` to add an elapsed marker to each tooltip progress bar, showing where even pacing would put you:
+
+```
+Without --tooltip-pace-pts:
+  Session
+    ░░░░░░░░░░░░░░░░░░░░  27% ↑
+
+With --tooltip-pace-pts:
+  Session
+    ░░░░░░░░░░█░░░░░░░░░  27% ↑
+                  ^ marker at 32% (even pace position)
+```
+
+The marker color adapts to the active theme. Without this flag, the tooltip is unchanged.
 
 ### Spacing
 
