@@ -177,6 +177,17 @@ die() {
     exit 0
 }
 
+# Soft exit for transient network failures with no usable cache. Emits a neutral
+# "Loading…" widget in the low class so Waybar styles it like normal usage and
+# doesn't draw attention to a state that will self-resolve on the next dispatch.
+loading_network() {
+    jq -nc \
+        --arg t "${BAR_ICON:+${BAR_ICON} }Loading…" \
+        --arg tip "Codex usage is waiting for network.\nWill retry on the next Waybar update." \
+        '{text:$t, tooltip:$tip, class:"low"}'
+    exit 0
+}
+
 color_for() {
     local p=$1
     if   (( p >= 90 )); then printf '%s' "$RED"
@@ -338,14 +349,22 @@ fi
 now_s=$(date +%s)
 expires_s=$(jwt_exp "$access_token")
 auth_ok=true
+refresh_failure_kind=""
+transient_stale=false
 
 if (( expires_s < now_s + REFRESH_BUFFER )); then
-    # Synchronous refresh — 15s timeout covers cold boot when DHCP is still settling.
-    resp=$(curl -sf --max-time 15 -X POST "$TOKEN_URL" \
+    # Synchronous refresh — 25s timeout covers cold boot when DHCP is still settling.
+    refresh_body=$(jq -nc --arg ci "$CLIENT_ID" --arg rt "$refresh_token" \
+                     '{client_id:$ci, grant_type:"refresh_token", refresh_token:$rt, scope:"openid profile email"}')
+    refresh_raw=$(curl -s --max-time 25 -w '\n%{http_code}' -X POST "$TOKEN_URL" \
         -H "Content-Type: application/json" \
-        -d "{\"client_id\":\"${CLIENT_ID}\",\"grant_type\":\"refresh_token\",\"refresh_token\":\"${refresh_token}\",\"scope\":\"openid profile email\"}") || true
+        --data "$refresh_body") || true
+    refresh_code="${refresh_raw##*$'\n'}"
+    resp="${refresh_raw%$'\n'"$refresh_code"}"
+    # Normalize bogus codes (e.g. raw body without curl write-out suffix) to 000.
+    [[ "$refresh_code" =~ ^[0-9]{3}$ ]] || refresh_code="000"
 
-    if [[ -n "$resp" ]] && jq -e '.access_token' <<< "$resp" &>/dev/null; then
+    if [[ "$refresh_code" == "200" ]] && [[ -n "$resp" ]] && jq -e '.access_token' <<< "$resp" &>/dev/null; then
         new_at=$(jq -r '.access_token // empty' <<< "$resp")
         new_rt=$(jq -r '.refresh_token // empty' <<< "$resp")
         new_idt=$(jq -r '.id_token // empty' <<< "$resp")
@@ -362,6 +381,13 @@ if (( expires_s < now_s + REFRESH_BUFFER )); then
            "$CREDS" > "$tmp" && mv "$tmp" "$CREDS"
     else
         auth_ok=false
+        if [[ "$refresh_code" == "000" ]]; then
+            # No HTTP response reached us — DHCP/DNS settling at boot, offline,
+            # or actual timeout. Don't persist; the next dispatch will retry.
+            refresh_failure_kind="transient"
+        else
+            refresh_failure_kind="hard"
+        fi
     fi
 fi
 
@@ -383,8 +409,19 @@ _fetch_usage() {
     fi
 
     if [[ "$auth_ok" == "false" ]]; then
-        # Token refresh failed — use stale cache if recent enough, otherwise error
-        if [[ -f "$cache_file" ]] && (( cache_age <= SESSION_WINDOW )); then
+        if [[ "$refresh_failure_kind" == "transient" ]]; then
+            # Network blip — stay quiet. Reuse recent cache with an in-memory
+            # stale flag, or show neutral "Loading…" if no usable cache exists.
+            # No disk markers, no desktop notification.
+            if [[ -f "$cache_file" ]] && (( cache_age <= WEEKLY_WINDOW )); then
+                usage=$(<"$cache_file")
+                transient_stale=true
+                return
+            fi
+            loading_network
+        fi
+        # Hard refresh failure — preserve actionable signal.
+        if [[ -f "$cache_file" ]] && (( cache_age <= WEEKLY_WINDOW )); then
             usage=$(<"$cache_file")
             rm -f "$CACHE_DIR/.last_error"
             if [[ ! -f "$stale_marker" ]]; then
@@ -424,7 +461,7 @@ _fetch_usage() {
 
 # Serialize concurrent instances (multi-monitor) so only one hits the API
 exec 9>"$_lockfile"
-flock -w 15 9 || die "Cache lock timeout"
+flock -w 45 9 || die "Cache lock timeout"
 _fetch_usage
 exec 9>&-
 
@@ -585,7 +622,7 @@ apply_format() {
 
 # Stale data indicator
 stale_icon=""
-[[ -f "$stale_marker" ]] && stale_icon=" ⏸"
+[[ -f "$stale_marker" || "${transient_stale:-false}" == "true" ]] && stale_icon=" ⏸"
 
 bar_text=$(apply_format "$FORMAT")${stale_icon}
 
@@ -670,7 +707,7 @@ else
     if [[ -f "$CACHE_DIR/.last_error" ]]; then
         _le_code="" _le_msg=""
         { read -r _le_code || true; read -r _le_msg || true; } < "$CACHE_DIR/.last_error" 2>/dev/null || true
-        if [[ -n "$_le_code" ]] && [[ "$_le_code" =~ ^[0-9]+$ ]]; then
+        if [[ -n "$_le_code" ]] && [[ "$_le_code" =~ ^[0-9]+$ ]] && [[ "$_le_code" != "000" ]]; then
             _le_msg=$(sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<< "$_le_msg")
             if (( _le_code >= 500 )); then
                 _err_icon="󰅚" _err_color="$RED"
@@ -763,6 +800,9 @@ else
         fi
     done
     t+="${B}╰${border_h}╯${E}"
+    if [[ -f "$stale_marker" ]]; then
+        t+="${NL}<span foreground='${ORANGE}'>  ⏸  Stale — will refresh next cycle</span>"
+    fi
 fi
 
 # --- Output waybar JSON ---
