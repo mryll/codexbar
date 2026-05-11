@@ -194,6 +194,7 @@ Example Waybar config with custom format:
 | `{session_pct}` | Session (5h) usage % | `42` |
 | `{session_reset}` | Session countdown | `1h 30m` |
 | `{session_elapsed}` | Session time elapsed % | `58` |
+| `{session_bar}` | Session usage progress bar (Pango) | `████████░░░░░░░░░░░░` |
 | `{session_pace}` | Session pacing icon (ratio-based) | `↑` / `↓` / `→` |
 | `{session_pace_indicator}` | Session pacing icon (point-based) | `↑` / `↓` / `→` |
 | `{session_pace_pct}` | Session pacing deviation (ratio) | `12% ahead` |
@@ -203,6 +204,7 @@ Example Waybar config with custom format:
 | `{weekly_pct}` | Weekly usage % | `27` |
 | `{weekly_reset}` | Weekly countdown | `4d 1h` |
 | `{weekly_elapsed}` | Weekly elapsed % | `42` |
+| `{weekly_bar}` | Weekly usage progress bar (Pango) | `█████░░░░░░░░░░░░░░░` |
 | `{weekly_pace}` | Weekly pacing icon (ratio-based) | `↑` / `↓` / `→` |
 | `{weekly_pace_indicator}` | Weekly pacing icon (point-based) | `↑` / `↓` / `→` |
 | `{weekly_pace_pct}` | Weekly pacing deviation (ratio) | `5% under` |
@@ -212,6 +214,7 @@ Example Waybar config with custom format:
 | `{review_pct}` | Code review usage % | `4` |
 | `{review_reset}` | Code review countdown | `6d 23h` |
 | `{review_elapsed}` | Code review time elapsed % | `42` |
+| `{review_bar}` | Code review usage progress bar (Pango) | `░░░░░░░░░░░░░░░░░░░░` |
 | `{review_pace}` | Code review pacing icon (ratio-based) | `↑` / `↓` / `→` |
 | `{review_pace_indicator}` | Code review pacing icon (point-based) | `↑` / `↓` / `→` |
 | `{review_pace_pct}` | Code review pacing deviation (ratio) | `3% ahead` |
@@ -221,6 +224,9 @@ Example Waybar config with custom format:
 | `{credits_balance}` | Credits balance | `0` |
 | `{credits_local}` | Approx local messages | `10–15` |
 | `{credits_cloud}` | Approx cloud messages | `5–8` |
+
+> [!NOTE]
+> Bar placeholders are colored by their own window's usage thresholds (low/mid/high/critical), independently of the surrounding bar text color, which reflects the worst window overall. A `{session_bar}` can render green while the surrounding text is red because weekly or review hit the critical threshold.
 
 ### Pacing indicators
 

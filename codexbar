@@ -12,6 +12,7 @@
 #   {session_pct}       Session (5h) usage %
 #   {session_reset}     Session countdown (e.g. "1h 30m")
 #   {session_elapsed}   Session time elapsed %
+#   {session_bar}       Session usage progress bar (Pango-colored)
 #   {session_pace}           Session pacing icon, ratio-based (↑ ↓ →)
 #   {session_pace_indicator} Session pacing icon, point-based (↑ ↓ →)
 #   {session_pace_pct}       Session pacing deviation, ratio (e.g. "72% ahead")
@@ -21,6 +22,7 @@
 #   {weekly_pct}        Weekly usage %
 #   {weekly_reset}      Weekly countdown (e.g. "4d 1h")
 #   {weekly_elapsed}    Weekly time elapsed %
+#   {weekly_bar}        Weekly usage progress bar (Pango-colored)
 #   {weekly_pace}            Weekly pacing icon, ratio-based (↑ ↓ →)
 #   {weekly_pace_indicator}  Weekly pacing icon, point-based (↑ ↓ →)
 #   {weekly_pace_pct}        Weekly pacing deviation, ratio (e.g. "72% ahead")
@@ -30,6 +32,7 @@
 #   {review_pct}        Code review usage %
 #   {review_reset}      Code review countdown
 #   {review_elapsed}    Code review time elapsed %
+#   {review_bar}        Code review usage progress bar (Pango-colored)
 #   {review_pace}            Review pacing icon, ratio-based (↑ ↓ →)
 #   {review_pace_indicator}  Review pacing icon, point-based (↑ ↓ →)
 #   {review_pace_pct}        Review pacing deviation, ratio (e.g. "72% ahead")
@@ -41,6 +44,8 @@
 #   {credits_cloud}     Approx cloud messages remaining
 #
 # Default format: "{session_pct}% · {session_reset}"
+# Note: bar placeholders are colored by their own window's usage, independent of
+#       the surrounding bar text color (which reflects the worst window).
 
 set -euo pipefail
 
@@ -580,6 +585,15 @@ w_cd_val=$(countdown "$weekly_reset_at")
 r_cd_val=""
 [[ "$has_review" == "true" ]] && r_cd_val=$(countdown "$review_reset_at")
 
+# Per-window colors and bars used by --format / --tooltip-format placeholders.
+# Each bar is colored by its own window's usage, independent of the bar text wrapper.
+session_color=$(color_for "$session_pct")
+weekly_color=$(color_for "$weekly_pct")
+review_color=$(color_for "$review_pct")
+format_session_bar=$(make_bar "$session_pct" "$session_color")
+format_weekly_bar=$(make_bar "$weekly_pct" "$weekly_color")
+format_review_bar=$(make_bar "$review_pct" "$review_color")
+
 apply_format() {
     local text="$1"
     text="${text//\{icon\}/}"
@@ -596,6 +610,9 @@ apply_format() {
     text="${text//\{credits_balance\}/$credits_balance}"
     text="${text//\{credits_local\}/$credits_local}"
     text="${text//\{credits_cloud\}/$credits_cloud}"
+    text="${text//\{session_bar\}/$format_session_bar}"
+    text="${text//\{weekly_bar\}/$format_weekly_bar}"
+    text="${text//\{review_bar\}/$format_review_bar}"
 
     # Pace placeholders — pre-computed colored or plain depending on --format-pace-color.
     text="${text//\{session_pace_indicator\}/$_sp_session_indicator}"
@@ -645,15 +662,13 @@ fi
 if [[ -n "$TOOLTIP_FORMAT" ]]; then
     t=$(apply_format "$TOOLTIP_FORMAT")
 else
-    # Default rich Pango tooltip
-    s_color=$(color_for "$session_pct")
-    w_color=$(color_for "$weekly_pct")
+    # Default rich Pango tooltip — tooltip-specific bars may carry an elapsed marker.
     if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
-        s_bar=$(make_bar "$session_pct" "$s_color" "$session_elapsed" "$MARKER")
-        w_bar=$(make_bar "$weekly_pct" "$w_color" "$weekly_elapsed" "$MARKER")
+        tip_session_bar=$(make_bar "$session_pct" "$session_color" "$session_elapsed" "$MARKER")
+        tip_weekly_bar=$(make_bar "$weekly_pct" "$weekly_color" "$weekly_elapsed" "$MARKER")
     else
-        s_bar=$(make_bar "$session_pct" "$s_color")
-        w_bar=$(make_bar "$weekly_pct" "$w_color")
+        tip_session_bar="$format_session_bar"
+        tip_weekly_bar="$format_weekly_bar"
     fi
     s_cd="$s_cd_val"
     w_cd="$w_cd_val"
@@ -670,24 +685,23 @@ else
     lines+=("SEP")
     lines+=("")
     lines+=(" <span foreground='${FG}'>  󰔟  Session</span>")
-    lines+=("   ${s_bar}  <span font_weight='bold' foreground='${s_color}'>${session_pct}% ${_tip_session_pace}</span>")
+    lines+=("   ${tip_session_bar}  <span font_weight='bold' foreground='${session_color}'>${session_pct}% ${_tip_session_pace}</span>")
     lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${s_cd}</span>")
     lines+=("")
     lines+=(" <span foreground='${FG}'>  󰃰  Weekly</span>")
-    lines+=("   ${w_bar}  <span font_weight='bold' foreground='${w_color}'>${weekly_pct}% ${_tip_weekly_pace}</span>")
+    lines+=("   ${tip_weekly_bar}  <span font_weight='bold' foreground='${weekly_color}'>${weekly_pct}% ${_tip_weekly_pace}</span>")
     lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${w_cd}</span>")
 
     if [[ "$has_review" == "true" ]]; then
-        r_color=$(color_for "$review_pct")
         if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
-            r_bar=$(make_bar "$review_pct" "$r_color" "$review_elapsed" "$MARKER")
+            tip_review_bar=$(make_bar "$review_pct" "$review_color" "$review_elapsed" "$MARKER")
         else
-            r_bar=$(make_bar "$review_pct" "$r_color")
+            tip_review_bar="$format_review_bar"
         fi
         r_cd=$(countdown "$review_reset_at")
         lines+=("")
         lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>")
-        lines+=("   ${r_bar}  <span font_weight='bold' foreground='${r_color}'>${review_pct}%</span>")
+        lines+=("   ${tip_review_bar}  <span font_weight='bold' foreground='${review_color}'>${review_pct}%</span>")
         lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${r_cd}</span>")
     fi
 
