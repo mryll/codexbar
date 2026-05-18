@@ -325,7 +325,7 @@ jwt_decode() {
     echo "$payload" | base64 -d 2>/dev/null
 }
 
-jwt_exp() { jwt_decode "$1" | jq -r '.exp // 0'; }
+jwt_exp() { jwt_decode "$1" | jq -r '(.exp // 0) | floor'; }
 
 # --- Pre-checks ---
 for cmd in curl jq date base64; do
@@ -472,9 +472,9 @@ exec 9>&-
 
 # --- Parse windows ---
 session_pct=$(jq -r '(.rate_limit.primary_window.used_percent // 0) | floor' <<< "$usage")
-session_reset_at=$(jq -r '.rate_limit.primary_window.reset_at // 0' <<< "$usage")
+session_reset_at=$(jq -r '(.rate_limit.primary_window.reset_at // 0) | floor' <<< "$usage")
 weekly_pct=$(jq -r '(.rate_limit.secondary_window.used_percent // 0) | floor' <<< "$usage")
-weekly_reset_at=$(jq -r '.rate_limit.secondary_window.reset_at // 0' <<< "$usage")
+weekly_reset_at=$(jq -r '(.rate_limit.secondary_window.reset_at // 0) | floor' <<< "$usage")
 
 # Code review
 has_review=$(jq '.code_review_rate_limit != null and .code_review_rate_limit.primary_window != null' <<< "$usage")
@@ -482,17 +482,17 @@ review_pct=0
 review_reset_at=0
 if [[ "$has_review" == "true" ]]; then
     review_pct=$(jq -r '(.code_review_rate_limit.primary_window.used_percent // 0) | floor' <<< "$usage")
-    review_reset_at=$(jq -r '.code_review_rate_limit.primary_window.reset_at // 0' <<< "$usage")
+    review_reset_at=$(jq -r '(.code_review_rate_limit.primary_window.reset_at // 0) | floor' <<< "$usage")
 fi
 
 # Credits
 credits_balance=$(jq -r '.credits.balance // "0"' <<< "$usage")
 has_credits=$(jq -r '.credits.has_credits // false' <<< "$usage")
 credits_unlimited=$(jq -r '.credits.unlimited // false' <<< "$usage")
-credits_local_lo=$(jq -r '.credits.approx_local_messages[0] // 0' <<< "$usage")
-credits_local_hi=$(jq -r '.credits.approx_local_messages[1] // 0' <<< "$usage")
-credits_cloud_lo=$(jq -r '.credits.approx_cloud_messages[0] // 0' <<< "$usage")
-credits_cloud_hi=$(jq -r '.credits.approx_cloud_messages[1] // 0' <<< "$usage")
+credits_local_lo=$(jq -r '(.credits.approx_local_messages[0] // 0) | floor' <<< "$usage")
+credits_local_hi=$(jq -r '(.credits.approx_local_messages[1] // 0) | floor' <<< "$usage")
+credits_cloud_lo=$(jq -r '(.credits.approx_cloud_messages[0] // 0) | floor' <<< "$usage")
+credits_cloud_hi=$(jq -r '(.credits.approx_cloud_messages[1] // 0) | floor' <<< "$usage")
 
 # Format credits local/cloud as range strings
 if (( credits_local_lo == credits_local_hi )); then
