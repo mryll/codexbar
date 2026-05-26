@@ -61,7 +61,7 @@ make uninstall PREFIX=~/.local
 ### Quick install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mryll/codexbar/main/codexbar \
+curl -fsSL https://raw.githubusercontent.com/mryll/codexbar/master/codexbar \
   -o ~/.local/bin/codexbar && chmod +x ~/.local/bin/codexbar
 ```
 
