@@ -719,6 +719,9 @@ review_color=$(color_for "$review_pct")
 format_session_bar=$(make_bar "$session_pct" "$session_color")
 format_weekly_bar=$(make_bar "$weekly_pct" "$weekly_color")
 format_review_bar=$(make_bar "$review_pct" "$review_color")
+format_session_remaining_bar=$(make_bar "$session_remaining_pct" "$session_color")
+format_weekly_remaining_bar=$(make_bar "$weekly_remaining_pct" "$weekly_color")
+format_review_remaining_bar=$(make_bar "$review_remaining_pct" "$review_color")
 
 apply_format() {
     local text="$1"
@@ -742,6 +745,9 @@ apply_format() {
     text="${text//\{session_bar\}/$format_session_bar}"
     text="${text//\{weekly_bar\}/$format_weekly_bar}"
     text="${text//\{review_bar\}/$format_review_bar}"
+    text="${text//\{session_remaining_bar\}/$format_session_remaining_bar}"
+    text="${text//\{weekly_remaining_bar\}/$format_weekly_remaining_bar}"
+    text="${text//\{review_remaining_bar\}/$format_review_remaining_bar}"
 
     # Pace placeholders — pre-computed colored or plain depending on --format-pace-color.
     text="${text//\{session_pace_indicator\}/$_sp_session_indicator}"
