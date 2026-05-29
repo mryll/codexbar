@@ -312,6 +312,7 @@ make_bar() {
     local p=$1 color=$2 marker_pos=${3:--1} marker_color=${4:-}
     local filled=$(( p * BAR_LEN / 100 ))
     (( filled > BAR_LEN )) && filled=$BAR_LEN
+    (( filled < 0 )) && filled=0
 
     local f="" e=""
     if (( marker_pos < 0 )); then
@@ -418,7 +419,7 @@ jwt_decode() {
     printf '%s' "$decoded" | jq -c -s 'if length == 1 and (.[0] | type == "object") then .[0] else {} end' 2>/dev/null || printf '{}'
 }
 
-jwt_exp() { jwt_decode "$1" | jq -r '((.exp | numbers) // 0) | floor'; }
+jwt_exp() { jwt_decode "$1" | jq -r '((.exp | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end'; }
 
 # --- Pre-checks ---
 for cmd in curl jq date base64; do
@@ -563,13 +564,17 @@ flock -w 45 9 || die "Cache lock timeout"
 _fetch_usage
 exec 9>&-
 
+# A corrupt/partial/multi-document cache could make the per-field reads emit
+# garbage or parse-error; require exactly one valid JSON document up front.
+jq -e -s 'length == 1' <<< "$usage" &>/dev/null || die "Invalid usage data.\nWill refresh next cycle."
+
 # --- Parse windows ---
-session_pct=$(jq -r 'try (((.rate_limit.primary_window.used_percent | numbers) // 0) | floor) catch 0' <<< "$usage")
-session_reset_at=$(jq -r 'try (((.rate_limit.primary_window.reset_at | numbers) // 0) | floor) catch 0' <<< "$usage")
-session_window_s=$(jq -r 'try (((.rate_limit.primary_window.limit_window_seconds | numbers) // 18000) | floor) catch 18000' <<< "$usage")
-weekly_pct=$(jq -r 'try (((.rate_limit.secondary_window.used_percent | numbers) // 0) | floor) catch 0' <<< "$usage")
-weekly_reset_at=$(jq -r 'try (((.rate_limit.secondary_window.reset_at | numbers) // 0) | floor) catch 0' <<< "$usage")
-weekly_window_s=$(jq -r 'try (((.rate_limit.secondary_window.limit_window_seconds | numbers) // 604800) | floor) catch 604800' <<< "$usage")
+session_pct=$(jq -r 'try (((.rate_limit.primary_window.used_percent | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+session_reset_at=$(jq -r 'try (((.rate_limit.primary_window.reset_at | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+session_window_s=$(jq -r 'try (((.rate_limit.primary_window.limit_window_seconds | numbers) // 18000) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 18000' <<< "$usage")
+weekly_pct=$(jq -r 'try (((.rate_limit.secondary_window.used_percent | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+weekly_reset_at=$(jq -r 'try (((.rate_limit.secondary_window.reset_at | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+weekly_window_s=$(jq -r 'try (((.rate_limit.secondary_window.limit_window_seconds | numbers) // 604800) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 604800' <<< "$usage")
 (( session_window_s > 0 )) || session_window_s=$SESSION_WINDOW
 (( weekly_window_s > 0 )) || weekly_window_s=$WEEKLY_WINDOW
 session_remaining_pct=$(remaining_pct_for "$session_pct")
@@ -580,9 +585,9 @@ has_review=$(jq 'try (.code_review_rate_limit != null and .code_review_rate_limi
 review_pct=0
 review_reset_at=0
 if [[ "$has_review" == "true" ]]; then
-    review_pct=$(jq -r 'try (((.code_review_rate_limit.primary_window.used_percent | numbers) // 0) | floor) catch 0' <<< "$usage")
-    review_reset_at=$(jq -r 'try (((.code_review_rate_limit.primary_window.reset_at | numbers) // 0) | floor) catch 0' <<< "$usage")
-    review_window_s=$(jq -r 'try (((.code_review_rate_limit.primary_window.limit_window_seconds | numbers) // 604800) | floor) catch 604800' <<< "$usage")
+    review_pct=$(jq -r 'try (((.code_review_rate_limit.primary_window.used_percent | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+    review_reset_at=$(jq -r 'try (((.code_review_rate_limit.primary_window.reset_at | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+    review_window_s=$(jq -r 'try (((.code_review_rate_limit.primary_window.limit_window_seconds | numbers) // 604800) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 604800' <<< "$usage")
     (( review_window_s > 0 )) || review_window_s=$WEEKLY_WINDOW
 fi
 review_remaining_pct=$(remaining_pct_for "$review_pct")
@@ -594,12 +599,12 @@ additional_limits_tsv=$(jq -r '
   | select(type == "object")
   | [
       ((.limit_name | strings | select(. != "")) // (.metered_feature | strings | select(. != "")) // "Additional"),
-      ((((try .rate_limit.primary_window.used_percent catch null) | numbers) // 0) | floor),
-      ((((try .rate_limit.primary_window.reset_at catch null) | numbers) // 0) | floor),
-      ((((try .rate_limit.primary_window.limit_window_seconds catch null) | numbers) // 0) | floor),
-      ((((try .rate_limit.secondary_window.used_percent catch null) | numbers) // 0) | floor),
-      ((((try .rate_limit.secondary_window.reset_at catch null) | numbers) // 0) | floor),
-      ((((try .rate_limit.secondary_window.limit_window_seconds catch null) | numbers) // 0) | floor)
+      (((((try .rate_limit.primary_window.used_percent catch null) | numbers) // 0) | floor) | if (. > 1e12 or . < 0) then 0 else . end),
+      (((((try .rate_limit.primary_window.reset_at catch null) | numbers) // 0) | floor) | if (. > 1e12 or . < 0) then 0 else . end),
+      (((((try .rate_limit.primary_window.limit_window_seconds catch null) | numbers) // 0) | floor) | if (. > 1e12 or . < 0) then 0 else . end),
+      (((((try .rate_limit.secondary_window.used_percent catch null) | numbers) // 0) | floor) | if (. > 1e12 or . < 0) then 0 else . end),
+      (((((try .rate_limit.secondary_window.reset_at catch null) | numbers) // 0) | floor) | if (. > 1e12 or . < 0) then 0 else . end),
+      (((((try .rate_limit.secondary_window.limit_window_seconds catch null) | numbers) // 0) | floor) | if (. > 1e12 or . < 0) then 0 else . end)
     ]
   | @tsv
 ' <<< "$usage")
@@ -609,21 +614,21 @@ additional_limits_tsv=$(jq -r '
 additional_max_pct=$(jq -r '
   ([.additional_rate_limits[]?
     | select(type == "object")
-    | (if (((((try .rate_limit.primary_window.limit_window_seconds catch null) | numbers) // 0)) | floor) > 0
-         then (((try .rate_limit.primary_window.used_percent catch null) | numbers) // 0) else empty end),
-      (if (((((try .rate_limit.secondary_window.limit_window_seconds catch null) | numbers) // 0)) | floor) > 0
-         then (((try .rate_limit.secondary_window.used_percent catch null) | numbers) // 0) else empty end)
-  ] | max // 0) | floor
+    | (if (((((try .rate_limit.primary_window.limit_window_seconds catch null) | numbers) // 0)) | floor | if (. > 1e12 or . < 0) then 0 else . end) > 0
+         then ((((try .rate_limit.primary_window.used_percent catch null) | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) else empty end),
+      (if (((((try .rate_limit.secondary_window.limit_window_seconds catch null) | numbers) // 0)) | floor | if (. > 1e12 or . < 0) then 0 else . end) > 0
+         then ((((try .rate_limit.secondary_window.used_percent catch null) | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) else empty end)
+  ] | max // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end
 ' <<< "$usage")
 
 # Credits
 credits_balance=$(jq -r 'try (.credits.balance // "0") catch "0"' <<< "$usage")
 has_credits=$(jq -r 'try (.credits.has_credits // false) catch false' <<< "$usage")
 credits_unlimited=$(jq -r 'try (.credits.unlimited // false) catch false' <<< "$usage")
-credits_local_lo=$(jq -r 'try (((.credits.approx_local_messages[0] | numbers) // 0) | floor) catch 0' <<< "$usage")
-credits_local_hi=$(jq -r 'try (((.credits.approx_local_messages[1] | numbers) // 0) | floor) catch 0' <<< "$usage")
-credits_cloud_lo=$(jq -r 'try (((.credits.approx_cloud_messages[0] | numbers) // 0) | floor) catch 0' <<< "$usage")
-credits_cloud_hi=$(jq -r 'try (((.credits.approx_cloud_messages[1] | numbers) // 0) | floor) catch 0' <<< "$usage")
+credits_local_lo=$(jq -r 'try (((.credits.approx_local_messages[0] | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+credits_local_hi=$(jq -r 'try (((.credits.approx_local_messages[1] | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+credits_cloud_lo=$(jq -r 'try (((.credits.approx_cloud_messages[0] | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
+credits_cloud_hi=$(jq -r 'try (((.credits.approx_cloud_messages[1] | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 0' <<< "$usage")
 
 # Format credits local/cloud as range strings
 if (( credits_local_lo == credits_local_hi )); then
