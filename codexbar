@@ -589,30 +589,29 @@ review_remaining_pct=$(remaining_pct_for "$review_pct")
 additional_limits_tsv=$(jq -r '
   .additional_rate_limits[]?
   | select(type == "object")
-  | (try (
-      [
-        ((.limit_name | strings) // (.metered_feature | strings) // "Additional"),
-        (((.rate_limit.primary_window.used_percent | numbers) // 0) | floor),
-        (((.rate_limit.primary_window.reset_at | numbers) // 0) | floor),
-        (((.rate_limit.primary_window.limit_window_seconds | numbers) // 0) | floor),
-        (((.rate_limit.secondary_window.used_percent | numbers) // 0) | floor),
-        (((.rate_limit.secondary_window.reset_at | numbers) // 0) | floor),
-        (((.rate_limit.secondary_window.limit_window_seconds | numbers) // 0) | floor)
-      ] | @tsv
-    ) catch empty)
+  | [
+      ((.limit_name | strings | select(. != "")) // (.metered_feature | strings | select(. != "")) // "Additional"),
+      ((((try .rate_limit.primary_window.used_percent catch null) | numbers) // 0) | floor),
+      ((((try .rate_limit.primary_window.reset_at catch null) | numbers) // 0) | floor),
+      ((((try .rate_limit.primary_window.limit_window_seconds catch null) | numbers) // 0) | floor),
+      ((((try .rate_limit.secondary_window.used_percent catch null) | numbers) // 0) | floor),
+      ((((try .rate_limit.secondary_window.reset_at catch null) | numbers) // 0) | floor),
+      ((((try .rate_limit.secondary_window.limit_window_seconds catch null) | numbers) // 0) | floor)
+    ]
+  | @tsv
 ' <<< "$usage")
 # Severity must track what the tooltip actually renders: only count a window's
 # usage when that window is displayable (limit_window_seconds > 0). Otherwise an
 # additional meter could push the widget to a worse class with nothing shown.
-additional_max_pct=$(jq -r 'try (
+additional_max_pct=$(jq -r '
   ([.additional_rate_limits[]?
     | select(type == "object")
-    | (if (((.rate_limit.primary_window.limit_window_seconds | numbers) // 0) | floor) > 0
-         then ((.rate_limit.primary_window.used_percent | numbers) // 0) else empty end),
-      (if (((.rate_limit.secondary_window.limit_window_seconds | numbers) // 0) | floor) > 0
-         then ((.rate_limit.secondary_window.used_percent | numbers) // 0) else empty end)
+    | (if (((((try .rate_limit.primary_window.limit_window_seconds catch null) | numbers) // 0)) | floor) > 0
+         then (((try .rate_limit.primary_window.used_percent catch null) | numbers) // 0) else empty end),
+      (if (((((try .rate_limit.secondary_window.limit_window_seconds catch null) | numbers) // 0)) | floor) > 0
+         then (((try .rate_limit.secondary_window.used_percent catch null) | numbers) // 0) else empty end)
   ] | max // 0) | floor
-) catch 0' <<< "$usage")
+' <<< "$usage")
 
 # Credits
 credits_balance=$(jq -r 'try (.credits.balance // "0") catch "0"' <<< "$usage")

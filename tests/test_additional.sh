@@ -12,4 +12,13 @@ FIX2='{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":10,"res
 run_codexbar "$FIX2" --remaining
 assert_exit0      "additional >100% clamp: exit 0"
 assert_json_valid "additional >100% clamp: valid JSON"
+
+# REGRESSION: blank limit_name must still render (fall back to metered_feature)
+# and stay in sync with severity — a windowed 95% meter must NOT become a hidden
+# meter that colors the widget critical without showing in the tooltip.
+FIX3='{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":5,"reset_at":9999999999,"limit_window_seconds":18000},"secondary_window":{"used_percent":5,"reset_at":9999999999,"limit_window_seconds":604800}},"additional_rate_limits":[{"limit_name":"","metered_feature":"codex_x","rate_limit":{"primary_window":{"used_percent":95,"reset_at":9999999999,"limit_window_seconds":18000}}}]}'
+run_codexbar "$FIX3" --remaining --tooltip-pace-pts
+assert_exit0   "blank limit_name: exit 0"
+assert_tip_has "blank limit_name falls back to metered_feature" "codex_x"
+assert_class   "blank limit_name 95% counts toward severity" critical
 finish
