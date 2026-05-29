@@ -27,6 +27,23 @@ run_codexbar() {
     return 0
 }
 
+# Like run_codexbar but with a caller-supplied auth.json, to exercise malformed
+# credentials. Stubs `curl` to fail instantly (no token-refresh/fetch touches the
+# network); the fresh cache supplies the output.
+# run_codexbar_auth '<auth-json>' '<usage-json>' [args...]
+run_codexbar_auth() {
+    local auth="$1" usage="$2"; shift 2
+    local home; home="$(mktemp -d)" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    mkdir -p "$home/.codex" "$home/.cache/codexbar" "$home/bin" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$home/bin/curl" && chmod +x "$home/bin/curl" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    printf '%s' "$auth"  > "$home/.codex/auth.json"          || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    printf '%s' "$usage" > "$home/.cache/codexbar/usage.json" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    touch "$home/.cache/codexbar/usage.json"
+    OUT=$(HOME="$home" PATH="$home/bin:$PATH" "$SCRIPT" "$@"); RC=$?
+    rm -rf "$home"
+    return 0
+}
+
 _ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 _no()  { FAIL=$((FAIL+1)); printf '  FAIL %s\n    %s\n' "$1" "${2:-}"; }
 

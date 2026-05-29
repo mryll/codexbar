@@ -406,16 +406,19 @@ calc_pacing() {
 
 # Decode JWT payload (base64url → JSON)
 jwt_decode() {
-    local token=$1 payload pad
+    local token=$1 payload pad decoded
     payload=$(echo "$token" | cut -d. -f2)
     pad=$(( 4 - ${#payload} % 4 ))
     (( pad < 4 )) && payload+=$(printf '%*s' "$pad" '' | tr ' ' '=')
     payload="${payload//-/+}"
     payload="${payload//_//}"
-    echo "$payload" | base64 -d 2>/dev/null
+    decoded=$(echo "$payload" | base64 -d 2>/dev/null || true)
+    # Always emit exactly one JSON OBJECT ("{}" for any malformed, empty, or
+    # non-object payload) so callers piping into jq never hit a parse OR index error.
+    printf '%s' "$decoded" | jq -c -s 'if length == 1 and (.[0] | type == "object") then .[0] else {} end' 2>/dev/null || printf '{}'
 }
 
-jwt_exp() { jwt_decode "$1" | jq -r '(.exp // 0) | floor'; }
+jwt_exp() { jwt_decode "$1" | jq -r '((.exp | numbers) // 0) | floor'; }
 
 # --- Pre-checks ---
 for cmd in curl jq date base64; do
@@ -436,7 +439,7 @@ account_id=$(jq -r '.tokens.account_id // empty' <<< "$creds")
 id_token_raw=$(jq -r '.tokens.id_token // empty' <<< "$creds")
 plan_type="unknown"
 if [[ -n "$id_token_raw" ]]; then
-    _pt=$(jwt_decode "$id_token_raw" | jq -r '."https://api.openai.com/auth".chatgpt_plan_type // empty')
+    _pt=$(jwt_decode "$id_token_raw" | jq -r '(."https://api.openai.com/auth".chatgpt_plan_type? // empty)')
     [[ -n "$_pt" ]] && plan_type="$_pt"
 fi
 
