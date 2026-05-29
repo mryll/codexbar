@@ -1,0 +1,5 @@
+# Keep the dev test suite in the repo but out of release archives
+# (GitHub's tag tarballs use `git archive`, which honors export-ignore),
+# so the AUR source tarball stays lean — make install only ships the script.
+tests/ export-ignore
+.gitattributes export-ignore
