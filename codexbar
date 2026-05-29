@@ -552,8 +552,9 @@ review_remaining_pct=$(remaining_pct_for "$review_pct")
 additional_limits_tsv=$(jq -r '
   (.additional_rate_limits // [])[]
   | [
-      (.limit_name // .metered_feature // "Additional"),
-      (.metered_feature // ""),
+      (if (.limit_name // "") != "" then .limit_name
+       elif (.metered_feature // "") != "" then .metered_feature
+       else "Additional" end),
       ((.rate_limit.primary_window.used_percent // 0) | floor),
       ((.rate_limit.primary_window.reset_at // 0) | floor),
       ((.rate_limit.primary_window.limit_window_seconds // 0) | floor),
@@ -563,10 +564,15 @@ additional_limits_tsv=$(jq -r '
     ]
   | @tsv
 ' <<< "$usage")
+# Severity must track what the tooltip actually renders: only count a window's
+# usage when that window is displayable (limit_window_seconds > 0). Otherwise an
+# additional meter could push the widget to a worse class with nothing shown.
 additional_max_pct=$(jq -r '
   ([.additional_rate_limits[]?
-    | (.rate_limit.primary_window.used_percent // 0),
-      (.rate_limit.secondary_window.used_percent // 0)
+    | (if ((.rate_limit.primary_window.limit_window_seconds // 0) | floor) > 0
+         then (.rate_limit.primary_window.used_percent // 0) else empty end),
+      (if ((.rate_limit.secondary_window.limit_window_seconds // 0) | floor) > 0
+         then (.rate_limit.secondary_window.used_percent // 0) else empty end)
   ] | max // 0) | floor
 ' <<< "$usage")
 
@@ -795,7 +801,7 @@ else
     fi
 
     if [[ -n "$additional_limits_tsv" ]]; then
-        while IFS=$'\t' read -r add_name add_feature add_primary_pct add_primary_reset add_primary_window add_secondary_pct add_secondary_reset add_secondary_window; do
+        while IFS=$'\t' read -r add_name add_primary_pct add_primary_reset add_primary_window add_secondary_pct add_secondary_reset add_secondary_window; do
             [[ -z "${add_name:-}" ]] && continue
             add_primary_pct=${add_primary_pct:-0}
             add_primary_reset=${add_primary_reset:-0}
@@ -803,6 +809,11 @@ else
             add_secondary_pct=${add_secondary_pct:-0}
             add_secondary_reset=${add_secondary_reset:-0}
             add_secondary_window=${add_secondary_window:-0}
+
+            # Only render (and thus count toward severity) meters with a displayable
+            # window. additional_max_pct applies the same gate, so the worst-case
+            # color can never come from a meter the tooltip doesn't show.
+            (( add_primary_window > 0 || add_secondary_window > 0 )) || continue
 
             lines+=("")
             lines+=("SEP")
