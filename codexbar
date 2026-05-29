@@ -858,13 +858,13 @@ else
                 read -r add_primary_elapsed add_primary_pace add_primary_indicator _discard <<< "$_add_primary_pace"
                 if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
                     add_primary_tip_pace="$add_primary_indicator"
-                    add_primary_bar=$(make_bar "$add_primary_pct" "$(color_for "$add_primary_pct")" "$add_primary_elapsed" "$MARKER")
+                    add_primary_bar=$(display_bar "$add_primary_pct" "$add_primary_elapsed" marker)
                 else
                     add_primary_tip_pace="$add_primary_pace"
-                    add_primary_bar=$(make_bar "$add_primary_pct" "$(color_for "$add_primary_pct")")
+                    add_primary_bar=$(display_bar "$add_primary_pct" "$add_primary_elapsed")
                 fi
                 add_primary_label=$(window_label_for_seconds "$add_primary_window" 0)
-                lines+=("   ${add_primary_bar}  <span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>${add_primary_pct}% ${add_primary_tip_pace}</span>")
+                lines+=("   ${add_primary_bar}  <span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>$(display_pct "$add_primary_pct")% ${add_primary_tip_pace}</span>")
                 lines+=(" <span foreground='${DIM}'>  ⏱  ${add_primary_label^} resets in $(countdown "$add_primary_reset")</span>")
             fi
 
@@ -873,13 +873,13 @@ else
                 read -r add_secondary_elapsed add_secondary_pace add_secondary_indicator _discard <<< "$_add_secondary_pace"
                 if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
                     add_secondary_tip_pace="$add_secondary_indicator"
-                    add_secondary_bar=$(make_bar "$add_secondary_pct" "$(color_for "$add_secondary_pct")" "$add_secondary_elapsed" "$MARKER")
+                    add_secondary_bar=$(display_bar "$add_secondary_pct" "$add_secondary_elapsed" marker)
                 else
                     add_secondary_tip_pace="$add_secondary_pace"
-                    add_secondary_bar=$(make_bar "$add_secondary_pct" "$(color_for "$add_secondary_pct")")
+                    add_secondary_bar=$(display_bar "$add_secondary_pct" "$add_secondary_elapsed")
                 fi
                 add_secondary_label=$(window_label_for_seconds "$add_secondary_window" 1)
-                lines+=("   ${add_secondary_bar}  <span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>${add_secondary_pct}% ${add_secondary_tip_pace}</span>")
+                lines+=("   ${add_secondary_bar}  <span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>$(display_pct "$add_secondary_pct")% ${add_secondary_tip_pace}</span>")
                 lines+=(" <span foreground='${DIM}'>  ⏱  ${add_secondary_label^} resets in $(countdown "$add_secondary_reset")</span>")
             fi
         done <<< "$additional_limits_tsv"
