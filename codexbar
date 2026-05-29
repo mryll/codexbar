@@ -260,6 +260,33 @@ remaining_pct_for() {
     printf '%s' "$(( 100 - p ))"
 }
 
+# Percentage to DISPLAY for a window under the current framing.
+display_pct() {  # <used_pct>
+    if [[ "$REMAINING" == "true" ]]; then remaining_pct_for "$1"; else printf '%s' "$1"; fi
+}
+
+# Progress bar to DISPLAY for a window under the current framing.
+# Usage: display_bar <used_pct> <elapsed_pct> [with_marker]
+# Color is always severity (color_for used_pct), in both framings.
+display_bar() {
+    local used=$1 elapsed=$2 with_marker=${3:-} color
+    color=$(color_for "$used")
+    if [[ "$REMAINING" == "true" ]]; then
+        local rem; rem=$(remaining_pct_for "$used")
+        if [[ -n "$with_marker" ]]; then
+            make_bar "$rem" "$color" "$(( 100 - elapsed ))" "$MARKER"
+        else
+            make_bar "$rem" "$color"
+        fi
+    else
+        if [[ -n "$with_marker" ]]; then
+            make_bar "$used" "$color" "$elapsed" "$MARKER"
+        else
+            make_bar "$used" "$color"
+        fi
+    fi
+}
+
 # Color based on signed pacing delta, centered around zero:
 #   <= -10  green   (well under pace, plenty of room)
 #   -10..0  yellow  (slightly under or exactly on pace)
@@ -766,11 +793,11 @@ if [[ -n "$TOOLTIP_FORMAT" ]]; then
 else
     # Default rich Pango tooltip — tooltip-specific bars may carry an elapsed marker.
     if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
-        tip_session_bar=$(make_bar "$session_pct" "$session_color" "$session_elapsed" "$MARKER")
-        tip_weekly_bar=$(make_bar "$weekly_pct" "$weekly_color" "$weekly_elapsed" "$MARKER")
+        tip_session_bar=$(display_bar "$session_pct" "$session_elapsed" marker)
+        tip_weekly_bar=$(display_bar "$weekly_pct" "$weekly_elapsed" marker)
     else
-        tip_session_bar="$format_session_bar"
-        tip_weekly_bar="$format_weekly_bar"
+        tip_session_bar=$(display_bar "$session_pct" "$session_elapsed")
+        tip_weekly_bar=$(display_bar "$weekly_pct" "$weekly_elapsed")
     fi
     s_cd="$s_cd_val"
     w_cd="$w_cd_val"
@@ -787,23 +814,23 @@ else
     lines+=("SEP")
     lines+=("")
     lines+=(" <span foreground='${FG}'>  󰔟  Session</span>")
-    lines+=("   ${tip_session_bar}  <span font_weight='bold' foreground='${session_color}'>${session_pct}% ${_tip_session_pace}</span>")
+    lines+=("   ${tip_session_bar}  <span font_weight='bold' foreground='${session_color}'>$(display_pct "$session_pct")% ${_tip_session_pace}</span>")
     lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${s_cd}</span>")
     lines+=("")
     lines+=(" <span foreground='${FG}'>  󰃰  Weekly</span>")
-    lines+=("   ${tip_weekly_bar}  <span font_weight='bold' foreground='${weekly_color}'>${weekly_pct}% ${_tip_weekly_pace}</span>")
+    lines+=("   ${tip_weekly_bar}  <span font_weight='bold' foreground='${weekly_color}'>$(display_pct "$weekly_pct")% ${_tip_weekly_pace}</span>")
     lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${w_cd}</span>")
 
     if [[ "$has_review" == "true" ]]; then
         if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
-            tip_review_bar=$(make_bar "$review_pct" "$review_color" "$review_elapsed" "$MARKER")
+            tip_review_bar=$(display_bar "$review_pct" "$review_elapsed" marker)
         else
-            tip_review_bar="$format_review_bar"
+            tip_review_bar=$(display_bar "$review_pct" "$review_elapsed")
         fi
         r_cd=$(countdown "$review_reset_at")
         lines+=("")
         lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>")
-        lines+=("   ${tip_review_bar}  <span font_weight='bold' foreground='${review_color}'>${review_pct}%</span>")
+        lines+=("   ${tip_review_bar}  <span font_weight='bold' foreground='${review_color}'>$(display_pct "$review_pct")%</span>")
         lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${r_cd}</span>")
     fi
 
