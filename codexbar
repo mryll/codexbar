@@ -524,12 +524,12 @@ _fetch_usage
 exec 9>&-
 
 # --- Parse windows ---
-session_pct=$(jq -r '(.rate_limit.primary_window.used_percent // 0) | floor' <<< "$usage")
-session_reset_at=$(jq -r '(.rate_limit.primary_window.reset_at // 0) | floor' <<< "$usage")
-session_window_s=$(jq -r '(.rate_limit.primary_window.limit_window_seconds // 18000) | floor' <<< "$usage")
-weekly_pct=$(jq -r '(.rate_limit.secondary_window.used_percent // 0) | floor' <<< "$usage")
-weekly_reset_at=$(jq -r '(.rate_limit.secondary_window.reset_at // 0) | floor' <<< "$usage")
-weekly_window_s=$(jq -r '(.rate_limit.secondary_window.limit_window_seconds // 604800) | floor' <<< "$usage")
+session_pct=$(jq -r '((.rate_limit.primary_window.used_percent | numbers) // 0) | floor' <<< "$usage")
+session_reset_at=$(jq -r '((.rate_limit.primary_window.reset_at | numbers) // 0) | floor' <<< "$usage")
+session_window_s=$(jq -r '((.rate_limit.primary_window.limit_window_seconds | numbers) // 18000) | floor' <<< "$usage")
+weekly_pct=$(jq -r '((.rate_limit.secondary_window.used_percent | numbers) // 0) | floor' <<< "$usage")
+weekly_reset_at=$(jq -r '((.rate_limit.secondary_window.reset_at | numbers) // 0) | floor' <<< "$usage")
+weekly_window_s=$(jq -r '((.rate_limit.secondary_window.limit_window_seconds | numbers) // 604800) | floor' <<< "$usage")
 (( session_window_s > 0 )) || session_window_s=$SESSION_WINDOW
 (( weekly_window_s > 0 )) || weekly_window_s=$WEEKLY_WINDOW
 session_remaining_pct=$(remaining_pct_for "$session_pct")
@@ -540,9 +540,9 @@ has_review=$(jq '.code_review_rate_limit != null and .code_review_rate_limit.pri
 review_pct=0
 review_reset_at=0
 if [[ "$has_review" == "true" ]]; then
-    review_pct=$(jq -r '(.code_review_rate_limit.primary_window.used_percent // 0) | floor' <<< "$usage")
-    review_reset_at=$(jq -r '(.code_review_rate_limit.primary_window.reset_at // 0) | floor' <<< "$usage")
-    review_window_s=$(jq -r '(.code_review_rate_limit.primary_window.limit_window_seconds // 604800) | floor' <<< "$usage")
+    review_pct=$(jq -r '((.code_review_rate_limit.primary_window.used_percent | numbers) // 0) | floor' <<< "$usage")
+    review_reset_at=$(jq -r '((.code_review_rate_limit.primary_window.reset_at | numbers) // 0) | floor' <<< "$usage")
+    review_window_s=$(jq -r '((.code_review_rate_limit.primary_window.limit_window_seconds | numbers) // 604800) | floor' <<< "$usage")
     (( review_window_s > 0 )) || review_window_s=$WEEKLY_WINDOW
 fi
 review_remaining_pct=$(remaining_pct_for "$review_pct")
@@ -550,17 +550,18 @@ review_remaining_pct=$(remaining_pct_for "$review_pct")
 # Additional Codex model-specific meters. Codex itself maps these as separate
 # rate-limit snapshots; keep them available for tooltip and severity decisions.
 additional_limits_tsv=$(jq -r '
-  (.additional_rate_limits // [])[]
+  .additional_rate_limits[]?
+  | select(type == "object")
   | [
       (if (.limit_name // "") != "" then .limit_name
        elif (.metered_feature // "") != "" then .metered_feature
        else "Additional" end),
-      ((.rate_limit.primary_window.used_percent // 0) | floor),
-      ((.rate_limit.primary_window.reset_at // 0) | floor),
-      ((.rate_limit.primary_window.limit_window_seconds // 0) | floor),
-      ((.rate_limit.secondary_window.used_percent // 0) | floor),
-      ((.rate_limit.secondary_window.reset_at // 0) | floor),
-      ((.rate_limit.secondary_window.limit_window_seconds // 0) | floor)
+      (((.rate_limit.primary_window.used_percent | numbers) // 0) | floor),
+      (((.rate_limit.primary_window.reset_at | numbers) // 0) | floor),
+      (((.rate_limit.primary_window.limit_window_seconds | numbers) // 0) | floor),
+      (((.rate_limit.secondary_window.used_percent | numbers) // 0) | floor),
+      (((.rate_limit.secondary_window.reset_at | numbers) // 0) | floor),
+      (((.rate_limit.secondary_window.limit_window_seconds | numbers) // 0) | floor)
     ]
   | @tsv
 ' <<< "$usage")
@@ -569,10 +570,11 @@ additional_limits_tsv=$(jq -r '
 # additional meter could push the widget to a worse class with nothing shown.
 additional_max_pct=$(jq -r '
   ([.additional_rate_limits[]?
-    | (if ((.rate_limit.primary_window.limit_window_seconds // 0) | floor) > 0
-         then (.rate_limit.primary_window.used_percent // 0) else empty end),
-      (if ((.rate_limit.secondary_window.limit_window_seconds // 0) | floor) > 0
-         then (.rate_limit.secondary_window.used_percent // 0) else empty end)
+    | select(type == "object")
+    | (if (((.rate_limit.primary_window.limit_window_seconds | numbers) // 0) | floor) > 0
+         then ((.rate_limit.primary_window.used_percent | numbers) // 0) else empty end),
+      (if (((.rate_limit.secondary_window.limit_window_seconds | numbers) // 0) | floor) > 0
+         then ((.rate_limit.secondary_window.used_percent | numbers) // 0) else empty end)
   ] | max // 0) | floor
 ' <<< "$usage")
 
@@ -580,10 +582,10 @@ additional_max_pct=$(jq -r '
 credits_balance=$(jq -r '.credits.balance // "0"' <<< "$usage")
 has_credits=$(jq -r '.credits.has_credits // false' <<< "$usage")
 credits_unlimited=$(jq -r '.credits.unlimited // false' <<< "$usage")
-credits_local_lo=$(jq -r '(.credits.approx_local_messages[0] // 0) | floor' <<< "$usage")
-credits_local_hi=$(jq -r '(.credits.approx_local_messages[1] // 0) | floor' <<< "$usage")
-credits_cloud_lo=$(jq -r '(.credits.approx_cloud_messages[0] // 0) | floor' <<< "$usage")
-credits_cloud_hi=$(jq -r '(.credits.approx_cloud_messages[1] // 0) | floor' <<< "$usage")
+credits_local_lo=$(jq -r '((.credits.approx_local_messages[0] | numbers) // 0) | floor' <<< "$usage")
+credits_local_hi=$(jq -r '((.credits.approx_local_messages[1] | numbers) // 0) | floor' <<< "$usage")
+credits_cloud_lo=$(jq -r '((.credits.approx_cloud_messages[0] | numbers) // 0) | floor' <<< "$usage")
+credits_cloud_hi=$(jq -r '((.credits.approx_cloud_messages[1] | numbers) // 0) | floor' <<< "$usage")
 
 # Format credits local/cloud as range strings
 if (( credits_local_lo == credits_local_hi )); then
