@@ -10,6 +10,7 @@ Waybar widget that displays your OpenAI Codex subscription usage — session (5h
 ## Features
 
 - Session (5h) and weekly usage with progress bars
+- Additional Codex model-specific usage meters in the tooltip
 - Code review usage tracking
 - Credits balance display
 - Pacing indicators — ratio-based and point-based, with optional per-window coloring
@@ -227,6 +228,8 @@ Example Waybar config with custom format:
 
 > [!NOTE]
 > Bar placeholders are colored by their own window's usage thresholds (low/mid/high/critical), independently of the surrounding bar text color, which reflects the worst window overall. A `{session_bar}` can render green while the surrounding text is red because weekly or review hit the critical threshold.
+
+Additional model-specific Codex limits returned by the backend are shown in the default tooltip and included in severity coloring. The built-in format placeholders continue to target the default Codex session, weekly, code review, and credits meters.
 
 ### Pacing indicators
 

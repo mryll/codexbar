@@ -202,6 +202,49 @@ color_for() {
     fi
 }
 
+pango_escape() {
+    sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<< "${1:-}"
+}
+
+format_plan_label() {
+    local raw="${1:-unknown}" label
+    case "$raw" in
+        prolite|pro_lite|pro-lite) printf 'Pro Lite' ;;
+        self_serve_business_usage_based) printf 'Business Usage Based' ;;
+        enterprise_cbp_usage_based) printf 'Enterprise Usage Based' ;;
+        *)
+            label="${raw//[_-]/ }"
+            printf '%s' "${label^}"
+            ;;
+    esac
+}
+
+is_approx_window() {
+    local seconds=$1 expected=$2
+    (( seconds >= expected * 95 / 100 && seconds <= expected * 105 / 100 ))
+}
+
+window_label_for_seconds() {
+    local seconds=${1:-0} is_secondary=${2:-0}
+    local hour=$(( 60 * 60 ))
+    local day=$(( 24 * hour ))
+    if is_approx_window "$seconds" "$(( 5 * hour ))"; then
+        printf '5h'
+    elif is_approx_window "$seconds" "$day"; then
+        printf 'daily'
+    elif is_approx_window "$seconds" "$(( 7 * day ))"; then
+        printf 'weekly'
+    elif is_approx_window "$seconds" "$(( 30 * day ))"; then
+        printf 'monthly'
+    elif is_approx_window "$seconds" "$(( 365 * day ))"; then
+        printf 'annual'
+    elif (( is_secondary )); then
+        printf 'secondary usage'
+    else
+        printf 'usage'
+    fi
+}
+
 # Color based on signed pacing delta, centered around zero:
 #   <= -10  green   (well under pace, plenty of room)
 #   -10..0  yellow  (slightly under or exactly on pace)
@@ -473,8 +516,12 @@ exec 9>&-
 # --- Parse windows ---
 session_pct=$(jq -r '(.rate_limit.primary_window.used_percent // 0) | floor' <<< "$usage")
 session_reset_at=$(jq -r '(.rate_limit.primary_window.reset_at // 0) | floor' <<< "$usage")
+session_window_s=$(jq -r '(.rate_limit.primary_window.limit_window_seconds // 18000) | floor' <<< "$usage")
 weekly_pct=$(jq -r '(.rate_limit.secondary_window.used_percent // 0) | floor' <<< "$usage")
 weekly_reset_at=$(jq -r '(.rate_limit.secondary_window.reset_at // 0) | floor' <<< "$usage")
+weekly_window_s=$(jq -r '(.rate_limit.secondary_window.limit_window_seconds // 604800) | floor' <<< "$usage")
+(( session_window_s > 0 )) || session_window_s=$SESSION_WINDOW
+(( weekly_window_s > 0 )) || weekly_window_s=$WEEKLY_WINDOW
 
 # Code review
 has_review=$(jq '.code_review_rate_limit != null and .code_review_rate_limit.primary_window != null' <<< "$usage")
@@ -483,7 +530,32 @@ review_reset_at=0
 if [[ "$has_review" == "true" ]]; then
     review_pct=$(jq -r '(.code_review_rate_limit.primary_window.used_percent // 0) | floor' <<< "$usage")
     review_reset_at=$(jq -r '(.code_review_rate_limit.primary_window.reset_at // 0) | floor' <<< "$usage")
+    review_window_s=$(jq -r '(.code_review_rate_limit.primary_window.limit_window_seconds // 604800) | floor' <<< "$usage")
+    (( review_window_s > 0 )) || review_window_s=$WEEKLY_WINDOW
 fi
+
+# Additional Codex model-specific meters. Codex itself maps these as separate
+# rate-limit snapshots; keep them available for tooltip and severity decisions.
+additional_limits_tsv=$(jq -r '
+  (.additional_rate_limits // [])[]
+  | [
+      (.limit_name // .metered_feature // "Additional"),
+      (.metered_feature // ""),
+      ((.rate_limit.primary_window.used_percent // 0) | floor),
+      ((.rate_limit.primary_window.reset_at // 0) | floor),
+      ((.rate_limit.primary_window.limit_window_seconds // 0) | floor),
+      ((.rate_limit.secondary_window.used_percent // 0) | floor),
+      ((.rate_limit.secondary_window.reset_at // 0) | floor),
+      ((.rate_limit.secondary_window.limit_window_seconds // 0) | floor)
+    ]
+  | @tsv
+' <<< "$usage")
+additional_max_pct=$(jq -r '
+  ([.additional_rate_limits[]?
+    | (.rate_limit.primary_window.used_percent // 0),
+      (.rate_limit.secondary_window.used_percent // 0)
+  ] | max // 0) | floor
+' <<< "$usage")
 
 # Credits
 credits_balance=$(jq -r '.credits.balance // "0"' <<< "$usage")
@@ -507,26 +579,26 @@ else
 fi
 
 # --- Plan label ---
-plan="${plan_type^}"
+plan=$(format_plan_label "$plan_type")
 # Also check API response for plan_type
 _api_plan=$(jq -r '.plan_type // empty' <<< "$usage" 2>/dev/null) || true
-[[ -n "$_api_plan" ]] && plan="${_api_plan^}"
+[[ -n "$_api_plan" ]] && plan=$(format_plan_label "$_api_plan")
 
 # --- Pacing ---
 # Output: elapsed icon indicator delta pct_label pts_label
-_s_pace=$(calc_pacing "$session_pct" "$session_reset_at" "$SESSION_WINDOW")
+_s_pace=$(calc_pacing "$session_pct" "$session_reset_at" "$session_window_s")
 read -r session_elapsed session_pace session_pace_indicator session_pace_delta _discard <<< "$_s_pace"
 session_pace_pct=$(cut -d' ' -f5-6 <<< "$_s_pace")
 session_pace_pts=$(cut -d' ' -f7-8 <<< "$_s_pace")
 
-_w_pace=$(calc_pacing "$weekly_pct" "$weekly_reset_at" "$WEEKLY_WINDOW")
+_w_pace=$(calc_pacing "$weekly_pct" "$weekly_reset_at" "$weekly_window_s")
 read -r weekly_elapsed weekly_pace weekly_pace_indicator weekly_pace_delta _discard <<< "$_w_pace"
 weekly_pace_pct=$(cut -d' ' -f5-6 <<< "$_w_pace")
 weekly_pace_pts=$(cut -d' ' -f7-8 <<< "$_w_pace")
 
 review_elapsed=0 review_pace="" review_pace_indicator="" review_pace_pct="" review_pace_pts="" review_pace_delta="0"
 if [[ "$has_review" == "true" ]]; then
-    _r_pace=$(calc_pacing "$review_pct" "$review_reset_at" "$WEEKLY_WINDOW")
+    _r_pace=$(calc_pacing "$review_pct" "$review_reset_at" "$review_window_s")
     read -r review_elapsed review_pace review_pace_indicator review_pace_delta _discard <<< "$_r_pace"
     review_pace_pct=$(cut -d' ' -f5-6 <<< "$_r_pace")
     review_pace_pts=$(cut -d' ' -f7-8 <<< "$_r_pace")
@@ -570,6 +642,7 @@ _precompute_pace review  "$review_pace"  "$review_pace_indicator"  "$review_pace
 max_pct=$session_pct
 (( weekly_pct > max_pct )) && max_pct=$weekly_pct
 (( review_pct > max_pct )) && max_pct=$review_pct
+(( additional_max_pct > max_pct )) && max_pct=$additional_max_pct
 
 class=""
 if   (( max_pct >= 90 )); then class="critical"
@@ -703,6 +776,52 @@ else
         lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>")
         lines+=("   ${tip_review_bar}  <span font_weight='bold' foreground='${review_color}'>${review_pct}%</span>")
         lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${r_cd}</span>")
+    fi
+
+    if [[ -n "$additional_limits_tsv" ]]; then
+        while IFS=$'\t' read -r add_name add_feature add_primary_pct add_primary_reset add_primary_window add_secondary_pct add_secondary_reset add_secondary_window; do
+            [[ -z "${add_name:-}" ]] && continue
+            add_primary_pct=${add_primary_pct:-0}
+            add_primary_reset=${add_primary_reset:-0}
+            add_primary_window=${add_primary_window:-0}
+            add_secondary_pct=${add_secondary_pct:-0}
+            add_secondary_reset=${add_secondary_reset:-0}
+            add_secondary_window=${add_secondary_window:-0}
+
+            lines+=("")
+            lines+=("SEP")
+            lines+=(" <span foreground='${FG}'>  󱐌  $(pango_escape "$add_name")</span>")
+
+            if (( add_primary_window > 0 )); then
+                _add_primary_pace=$(calc_pacing "$add_primary_pct" "$add_primary_reset" "$add_primary_window")
+                read -r add_primary_elapsed add_primary_pace add_primary_indicator _discard <<< "$_add_primary_pace"
+                if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
+                    add_primary_tip_pace="$add_primary_indicator"
+                    add_primary_bar=$(make_bar "$add_primary_pct" "$(color_for "$add_primary_pct")" "$add_primary_elapsed" "$MARKER")
+                else
+                    add_primary_tip_pace="$add_primary_pace"
+                    add_primary_bar=$(make_bar "$add_primary_pct" "$(color_for "$add_primary_pct")")
+                fi
+                add_primary_label=$(window_label_for_seconds "$add_primary_window" 0)
+                lines+=("   ${add_primary_bar}  <span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>${add_primary_pct}% ${add_primary_tip_pace}</span>")
+                lines+=(" <span foreground='${DIM}'>  ⏱  ${add_primary_label^} resets in $(countdown "$add_primary_reset")</span>")
+            fi
+
+            if (( add_secondary_window > 0 )); then
+                _add_secondary_pace=$(calc_pacing "$add_secondary_pct" "$add_secondary_reset" "$add_secondary_window")
+                read -r add_secondary_elapsed add_secondary_pace add_secondary_indicator _discard <<< "$_add_secondary_pace"
+                if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
+                    add_secondary_tip_pace="$add_secondary_indicator"
+                    add_secondary_bar=$(make_bar "$add_secondary_pct" "$(color_for "$add_secondary_pct")" "$add_secondary_elapsed" "$MARKER")
+                else
+                    add_secondary_tip_pace="$add_secondary_pace"
+                    add_secondary_bar=$(make_bar "$add_secondary_pct" "$(color_for "$add_secondary_pct")")
+                fi
+                add_secondary_label=$(window_label_for_seconds "$add_secondary_window" 1)
+                lines+=("   ${add_secondary_bar}  <span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>${add_secondary_pct}% ${add_secondary_tip_pace}</span>")
+                lines+=(" <span foreground='${DIM}'>  ⏱  ${add_secondary_label^} resets in $(countdown "$add_secondary_reset")</span>")
+            fi
+        done <<< "$additional_limits_tsv"
     fi
 
     if [[ "$has_credits" == "true" ]]; then
