@@ -8,4 +8,9 @@ assert_exit0  "tooltip remaining: exit 0"
 assert_tip_has "tooltip shows session remaining 30%" "30%"
 assert_tip_has "tooltip shows weekly remaining 60%"  "60%"
 assert_class  "class still severity (mid)" mid
+assert_tip_has "remaining mode labels the header" "Codex Plus · Remaining"
+
+# usage mode must NOT add the Remaining label
+run_codexbar "$FIX" --tooltip-pace-pts
+assert_tip_lacks "usage mode header has no Remaining label" "Remaining"
 finish

@@ -819,7 +819,9 @@ else
 
     # Collect all content lines into an array
     lines=()
-    lines+=("CENTER<span font_weight='bold' foreground='${BLUE}'>Codex ${plan}</span>")
+    _tip_title="Codex ${plan}"
+    [[ "$REMAINING" == "true" ]] && _tip_title="${_tip_title} · Remaining"
+    lines+=("CENTER<span font_weight='bold' foreground='${BLUE}'>${_tip_title}</span>")
     lines+=("SEP")
     lines+=("")
     lines+=(" <span foreground='${FG}'>  󰔟  Session</span>")
