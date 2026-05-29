@@ -166,6 +166,10 @@ codexbar --format '{session_pct}% {session_pace} · {session_reset}'
 # Minimal
 codexbar --format '{session_pct}%'
 # => 42%
+
+# Codex-style remaining quota
+codexbar --format '{session_remaining_pct}% · {session_reset}'
+# => 58% · 1h 30m
 ```
 
 Use `--tooltip-format` for a custom plain-text tooltip (overrides the default rich tooltip):
@@ -193,6 +197,7 @@ Example Waybar config with custom format:
 |---|---|---|
 | `{plan}` | Plan label | `Plus` |
 | `{session_pct}` | Session (5h) usage % | `42` |
+| `{session_remaining_pct}` | Session (5h) remaining % | `58` |
 | `{session_reset}` | Session countdown | `1h 30m` |
 | `{session_elapsed}` | Session time elapsed % | `58` |
 | `{session_bar}` | Session usage progress bar (Pango) | `████████░░░░░░░░░░░░` |
@@ -203,6 +208,7 @@ Example Waybar config with custom format:
 | `{session_pace_delta}` | Session pacing delta (signed) | `-12` |
 | `{session_pace_abs_delta}` | Session pacing delta (unsigned) | `12` |
 | `{weekly_pct}` | Weekly usage % | `27` |
+| `{weekly_remaining_pct}` | Weekly remaining % | `73` |
 | `{weekly_reset}` | Weekly countdown | `4d 1h` |
 | `{weekly_elapsed}` | Weekly elapsed % | `42` |
 | `{weekly_bar}` | Weekly usage progress bar (Pango) | `█████░░░░░░░░░░░░░░░` |
@@ -213,6 +219,7 @@ Example Waybar config with custom format:
 | `{weekly_pace_delta}` | Weekly pacing delta (signed) | `-8` |
 | `{weekly_pace_abs_delta}` | Weekly pacing delta (unsigned) | `8` |
 | `{review_pct}` | Code review usage % | `4` |
+| `{review_remaining_pct}` | Code review remaining % | `96` |
 | `{review_reset}` | Code review countdown | `6d 23h` |
 | `{review_elapsed}` | Code review time elapsed % | `42` |
 | `{review_bar}` | Code review usage progress bar (Pango) | `░░░░░░░░░░░░░░░░░░░░` |

@@ -9,30 +9,33 @@
 #
 # Format placeholders:
 #   {plan}              Plan label (e.g. "Plus")
-#   {session_pct}       Session (5h) usage %
-#   {session_reset}     Session countdown (e.g. "1h 30m")
-#   {session_elapsed}   Session time elapsed %
-#   {session_bar}       Session usage progress bar (Pango-colored)
+#   {session_pct}            Session (5h) usage %
+#   {session_remaining_pct}  Session (5h) remaining %
+#   {session_reset}          Session countdown (e.g. "1h 30m")
+#   {session_elapsed}        Session time elapsed %
+#   {session_bar}            Session usage progress bar (Pango-colored)
 #   {session_pace}           Session pacing icon, ratio-based (↑ ↓ →)
 #   {session_pace_indicator} Session pacing icon, point-based (↑ ↓ →)
 #   {session_pace_pct}       Session pacing deviation, ratio (e.g. "72% ahead")
 #   {session_pace_pts}       Session pacing deviation, points (e.g. "12pts ahead")
 #   {session_pace_delta}     Session pacing delta, signed (e.g. "-12", "5", "0")
 #   {session_pace_abs_delta} Session pacing delta, unsigned (e.g. "12", "5", "0")
-#   {weekly_pct}        Weekly usage %
-#   {weekly_reset}      Weekly countdown (e.g. "4d 1h")
-#   {weekly_elapsed}    Weekly time elapsed %
-#   {weekly_bar}        Weekly usage progress bar (Pango-colored)
+#   {weekly_pct}             Weekly usage %
+#   {weekly_remaining_pct}   Weekly remaining %
+#   {weekly_reset}           Weekly countdown (e.g. "4d 1h")
+#   {weekly_elapsed}         Weekly time elapsed %
+#   {weekly_bar}             Weekly usage progress bar (Pango-colored)
 #   {weekly_pace}            Weekly pacing icon, ratio-based (↑ ↓ →)
 #   {weekly_pace_indicator}  Weekly pacing icon, point-based (↑ ↓ →)
 #   {weekly_pace_pct}        Weekly pacing deviation, ratio (e.g. "72% ahead")
 #   {weekly_pace_pts}        Weekly pacing deviation, points (e.g. "12pts ahead")
 #   {weekly_pace_delta}      Weekly pacing delta, signed (e.g. "-12", "5", "0")
 #   {weekly_pace_abs_delta}  Weekly pacing delta, unsigned (e.g. "12", "5", "0")
-#   {review_pct}        Code review usage %
-#   {review_reset}      Code review countdown
-#   {review_elapsed}    Code review time elapsed %
-#   {review_bar}        Code review usage progress bar (Pango-colored)
+#   {review_pct}             Code review usage %
+#   {review_remaining_pct}   Code review remaining %
+#   {review_reset}           Code review countdown
+#   {review_elapsed}         Code review time elapsed %
+#   {review_bar}             Code review usage progress bar (Pango-colored)
 #   {review_pace}            Review pacing icon, ratio-based (↑ ↓ →)
 #   {review_pace_indicator}  Review pacing icon, point-based (↑ ↓ →)
 #   {review_pace_pct}        Review pacing deviation, ratio (e.g. "72% ahead")
@@ -243,6 +246,13 @@ window_label_for_seconds() {
     else
         printf 'usage'
     fi
+}
+
+remaining_pct_for() {
+    local p=${1:-0}
+    (( p < 0 )) && p=0
+    (( p > 100 )) && p=100
+    printf '%s' "$(( 100 - p ))"
 }
 
 # Color based on signed pacing delta, centered around zero:
@@ -522,6 +532,8 @@ weekly_reset_at=$(jq -r '(.rate_limit.secondary_window.reset_at // 0) | floor' <
 weekly_window_s=$(jq -r '(.rate_limit.secondary_window.limit_window_seconds // 604800) | floor' <<< "$usage")
 (( session_window_s > 0 )) || session_window_s=$SESSION_WINDOW
 (( weekly_window_s > 0 )) || weekly_window_s=$WEEKLY_WINDOW
+session_remaining_pct=$(remaining_pct_for "$session_pct")
+weekly_remaining_pct=$(remaining_pct_for "$weekly_pct")
 
 # Code review
 has_review=$(jq '.code_review_rate_limit != null and .code_review_rate_limit.primary_window != null' <<< "$usage")
@@ -533,6 +545,7 @@ if [[ "$has_review" == "true" ]]; then
     review_window_s=$(jq -r '(.code_review_rate_limit.primary_window.limit_window_seconds // 604800) | floor' <<< "$usage")
     (( review_window_s > 0 )) || review_window_s=$WEEKLY_WINDOW
 fi
+review_remaining_pct=$(remaining_pct_for "$review_pct")
 
 # Additional Codex model-specific meters. Codex itself maps these as separate
 # rate-limit snapshots; keep them available for tooltip and severity decisions.
@@ -672,12 +685,15 @@ apply_format() {
     text="${text//\{icon\}/}"
     text="${text//\{plan\}/$plan}"
     text="${text//\{session_pct\}/$session_pct}"
+    text="${text//\{session_remaining_pct\}/$session_remaining_pct}"
     text="${text//\{session_reset\}/$s_cd_val}"
     text="${text//\{session_elapsed\}/$session_elapsed}"
     text="${text//\{weekly_pct\}/$weekly_pct}"
+    text="${text//\{weekly_remaining_pct\}/$weekly_remaining_pct}"
     text="${text//\{weekly_reset\}/$w_cd_val}"
     text="${text//\{weekly_elapsed\}/$weekly_elapsed}"
     text="${text//\{review_pct\}/$review_pct}"
+    text="${text//\{review_remaining_pct\}/$review_remaining_pct}"
     text="${text//\{review_reset\}/$r_cd_val}"
     text="${text//\{review_elapsed\}/$review_elapsed}"
     text="${text//\{credits_balance\}/$credits_balance}"
