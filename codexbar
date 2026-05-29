@@ -63,6 +63,8 @@ BAR_COLOR_CRITICAL=""
 BAR_ICON=""
 FORMAT_PACE_COLOR=false
 TOOLTIP_PACE_PTS=false
+REMAINING=false
+FORMAT_SET=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --icon)
@@ -70,10 +72,11 @@ while [[ $# -gt 0 ]]; do
             BAR_ICON="$2"; shift 2 ;;
         --format)
             [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--format requires a value","class":"critical"}'; exit 0; }
-            FORMAT="$2"; shift 2 ;;
+            FORMAT="$2"; FORMAT_SET=true; shift 2 ;;
         --tooltip-format)
             [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--tooltip-format requires a value","class":"critical"}'; exit 0; }
             TOOLTIP_FORMAT="$2"; shift 2 ;;
+        --remaining) REMAINING=true; shift ;;
         --pace-tolerance)
             [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--pace-tolerance requires a value","class":"critical"}'; exit 0; }
             PACE_TOLERANCE="$2"; shift 2 ;;
@@ -92,6 +95,8 @@ while [[ $# -gt 0 ]]; do
 done
 [[ "$PACE_TOLERANCE" =~ ^[0-9]+$ ]] || { echo '{"text":"⚠","tooltip":"--pace-tolerance must be a non-negative integer","class":"critical"}'; exit 0; }
 PACE_TOLERANCE=$((10#$PACE_TOLERANCE))
+# In remaining mode, default the bar to "what's left" unless the user set their own format.
+[[ "$REMAINING" == "true" && "$FORMAT_SET" == "false" ]] && FORMAT="{session_remaining_pct}% · {session_reset}"
 
 CREDS="$HOME/.codex/auth.json"
 API_URL="https://chatgpt.com/backend-api/wham/usage"
