@@ -201,7 +201,7 @@ Example Waybar config with custom format:
 | `{session_reset}` | Session countdown | `1h 30m` |
 | `{session_elapsed}` | Session time elapsed % | `58` |
 | `{session_bar}` | Session usage progress bar (Pango) | `████████░░░░░░░░░░░░` |
-| `{session_remaining_bar}` | Session remaining progress bar (Pango) | `░░░░░░░░████████████` |
+| `{session_remaining_bar}` | Session remaining progress bar (Pango) | `███████████░░░░░░░░░` |
 | `{session_pace}` | Session pacing icon (ratio-based) | `↑` / `↓` / `→` |
 | `{session_pace_indicator}` | Session pacing icon (point-based) | `↑` / `↓` / `→` |
 | `{session_pace_pct}` | Session pacing deviation (ratio) | `12% ahead` |
@@ -213,7 +213,7 @@ Example Waybar config with custom format:
 | `{weekly_reset}` | Weekly countdown | `4d 1h` |
 | `{weekly_elapsed}` | Weekly elapsed % | `42` |
 | `{weekly_bar}` | Weekly usage progress bar (Pango) | `█████░░░░░░░░░░░░░░░` |
-| `{weekly_remaining_bar}` | Weekly remaining progress bar (Pango) | `░░░░░███████████████` |
+| `{weekly_remaining_bar}` | Weekly remaining progress bar (Pango) | `██████████████░░░░░░` |
 | `{weekly_pace}` | Weekly pacing icon (ratio-based) | `↑` / `↓` / `→` |
 | `{weekly_pace_indicator}` | Weekly pacing icon (point-based) | `↑` / `↓` / `→` |
 | `{weekly_pace_pct}` | Weekly pacing deviation (ratio) | `5% under` |
@@ -225,7 +225,7 @@ Example Waybar config with custom format:
 | `{review_reset}` | Code review countdown | `6d 23h` |
 | `{review_elapsed}` | Code review time elapsed % | `42` |
 | `{review_bar}` | Code review usage progress bar (Pango) | `░░░░░░░░░░░░░░░░░░░░` |
-| `{review_remaining_bar}` | Code review remaining progress bar (Pango) | `████████████████████` |
+| `{review_remaining_bar}` | Code review remaining progress bar (Pango) | `███████████████████░` |
 | `{review_pace}` | Code review pacing icon (ratio-based) | `↑` / `↓` / `→` |
 | `{review_pace_indicator}` | Code review pacing icon (point-based) | `↑` / `↓` / `→` |
 | `{review_pace_pct}` | Code review pacing deviation (ratio) | `3% ahead` |
@@ -324,8 +324,9 @@ The marker color adapts to the active theme. Without this flag, the tooltip is u
 ### Remaining mode
 
 `--remaining` flips the default framing to "what's left": the bar text shows remaining %, and the
-tooltip renders draining bars with a remaining-time marker. Severity coloring is unchanged (red
-when little remains). A custom `--format` / `--tooltip-format` always takes precedence.
+tooltip renders draining bars (with a remaining-time marker when `--tooltip-pace-pts` is set).
+Severity coloring is unchanged (red when little remains). A custom `--format` / `--tooltip-format`
+always takes precedence.
 
 ```bash
 codexbar --remaining

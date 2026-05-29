@@ -11,16 +11,16 @@ _b64url() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
 # run_codexbar '<usage-json>' [args...]  -> prints script stdout; sets RC
 run_codexbar() {
     local usage="$1"; shift
-    local home; home="$(mktemp -d)"
-    mkdir -p "$home/.codex" "$home/.cache/codexbar"
+    local home; home="$(mktemp -d)" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    mkdir -p "$home/.codex" "$home/.cache/codexbar" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
     local hdr acc idt
     hdr=$(printf '{"alg":"RS256"}' | _b64url)
     acc=$(printf '{"exp":4102444800}' | _b64url)            # year 2100 -> no refresh
     idt=$(printf '{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}' | _b64url)
     jq -nc --arg at "$hdr.$acc.sig" --arg idt "$hdr.$idt.sig" \
         '{tokens:{access_token:$at,refresh_token:"x",account_id:"a",id_token:$idt}}' \
-        > "$home/.codex/auth.json"
-    printf '%s' "$usage" > "$home/.cache/codexbar/usage.json"
+        > "$home/.codex/auth.json" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    printf '%s' "$usage" > "$home/.cache/codexbar/usage.json" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
     touch "$home/.cache/codexbar/usage.json"                 # fresh -> use cache, no fetch
     OUT=$(HOME="$home" "$SCRIPT" "$@"); RC=$?
     rm -rf "$home"
