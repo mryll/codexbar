@@ -4,7 +4,7 @@
 # with colored progress bars and Pango markup tooltip.
 #
 # Usage: codexbar [--icon ICON] [--format FORMAT] [--tooltip-format FORMAT] [--pace-tolerance N]
-#                  [--format-pace-color] [--tooltip-pace-pts]
+#                  [--format-pace-color] [--tooltip-pace-pts] [--remaining]
 #                  [--color-low HEX] [--color-mid HEX] [--color-high HEX] [--color-critical HEX]
 #
 # Format placeholders:
@@ -14,6 +14,7 @@
 #   {session_reset}          Session countdown (e.g. "1h 30m")
 #   {session_elapsed}        Session time elapsed %
 #   {session_bar}            Session usage progress bar (Pango-colored)
+#   {session_remaining_bar}  Session remaining progress bar (Pango-colored)
 #   {session_pace}           Session pacing icon, ratio-based (↑ ↓ →)
 #   {session_pace_indicator} Session pacing icon, point-based (↑ ↓ →)
 #   {session_pace_pct}       Session pacing deviation, ratio (e.g. "72% ahead")
@@ -25,6 +26,7 @@
 #   {weekly_reset}           Weekly countdown (e.g. "4d 1h")
 #   {weekly_elapsed}         Weekly time elapsed %
 #   {weekly_bar}             Weekly usage progress bar (Pango-colored)
+#   {weekly_remaining_bar}   Weekly remaining progress bar (Pango-colored)
 #   {weekly_pace}            Weekly pacing icon, ratio-based (↑ ↓ →)
 #   {weekly_pace_indicator}  Weekly pacing icon, point-based (↑ ↓ →)
 #   {weekly_pace_pct}        Weekly pacing deviation, ratio (e.g. "72% ahead")
@@ -36,6 +38,7 @@
 #   {review_reset}           Code review countdown
 #   {review_elapsed}         Code review time elapsed %
 #   {review_bar}             Code review usage progress bar (Pango-colored)
+#   {review_remaining_bar}   Code review remaining progress bar (Pango-colored)
 #   {review_pace}            Review pacing icon, ratio-based (↑ ↓ →)
 #   {review_pace_indicator}  Review pacing icon, point-based (↑ ↓ →)
 #   {review_pace_pct}        Review pacing deviation, ratio (e.g. "72% ahead")
@@ -49,6 +52,8 @@
 # Default format: "{session_pct}% · {session_reset}"
 # Note: bar placeholders are colored by their own window's usage, independent of
 #       the surrounding bar text color (which reflects the worst window).
+# Note: --remaining            Show "what's left": default bar + tooltip flip to remaining
+#                              (drain bars + remaining-time marker). User --format/--tooltip-format win.
 
 set -euo pipefail
 
