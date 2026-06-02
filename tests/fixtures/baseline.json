@@ -2,5 +2,4 @@
  "rate_limit":{"primary_window":{"used_percent":46,"reset_at":9999999999,"limit_window_seconds":18000},
                "secondary_window":{"used_percent":47,"reset_at":9999999999,"limit_window_seconds":604800}},
  "code_review_rate_limit":{"primary_window":{"used_percent":4,"reset_at":9999999999,"limit_window_seconds":604800}},
- "credits":{"has_credits":true,"balance":"12","approx_local_messages":[10,20],"approx_cloud_messages":[5,5]},
- "additional_rate_limits":[{"limit_name":"GPT-5.3-Codex-Spark","rate_limit":{"primary_window":{"used_percent":12,"reset_at":9999999999,"limit_window_seconds":18000},"secondary_window":{"used_percent":3,"reset_at":9999999999,"limit_window_seconds":604800}}}]}
+ "credits":{"has_credits":true,"balance":"12","approx_local_messages":[10,20],"approx_cloud_messages":[5,5]}}

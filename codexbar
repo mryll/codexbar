@@ -883,8 +883,10 @@ else
                     add_primary_bar=$(display_bar "$add_primary_pct" "$add_primary_elapsed")
                 fi
                 add_primary_label=$(window_label_for_seconds "$add_primary_window" 0)
+                lines+=("")
+                lines+=(" <span foreground='${FG}'>  󰔟  ${add_primary_label^}</span>")
                 lines+=("   ${add_primary_bar}  <span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>$(display_pct "$add_primary_pct")% ${add_primary_tip_pace}</span>")
-                lines+=(" <span foreground='${DIM}'>  ⏱  ${add_primary_label^} resets in $(countdown "$add_primary_reset")</span>")
+                lines+=(" <span foreground='${DIM}'>  ⏱  Resets in $(countdown "$add_primary_reset")</span>")
             fi
 
             if (( add_secondary_window > 0 )); then
@@ -898,8 +900,10 @@ else
                     add_secondary_bar=$(display_bar "$add_secondary_pct" "$add_secondary_elapsed")
                 fi
                 add_secondary_label=$(window_label_for_seconds "$add_secondary_window" 1)
+                lines+=("")
+                lines+=(" <span foreground='${FG}'>  󰃰  ${add_secondary_label^}</span>")
                 lines+=("   ${add_secondary_bar}  <span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>$(display_pct "$add_secondary_pct")% ${add_secondary_tip_pace}</span>")
-                lines+=(" <span foreground='${DIM}'>  ⏱  ${add_secondary_label^} resets in $(countdown "$add_secondary_reset")</span>")
+                lines+=(" <span foreground='${DIM}'>  ⏱  Resets in $(countdown "$add_secondary_reset")</span>")
             fi
         done <<< "$additional_limits_tsv"
     fi

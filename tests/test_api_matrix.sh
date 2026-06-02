@@ -8,8 +8,8 @@ LBL="minimal plus"; R '{"plan_type":"plus","rate_limit":{"primary_window":{"used
 LBL="review present"; R '{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":1,"reset_at":9999999999,"limit_window_seconds":18000},"secondary_window":{"used_percent":1,"reset_at":9999999999,"limit_window_seconds":604800}},"code_review_rate_limit":{"primary_window":{"used_percent":4,"reset_at":9999999999,"limit_window_seconds":604800}}}'
 # credits unlimited + ranges
 LBL="credits"; R '{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":1,"reset_at":9999999999,"limit_window_seconds":18000},"secondary_window":{"used_percent":1,"reset_at":9999999999,"limit_window_seconds":604800}},"credits":{"has_credits":true,"unlimited":true,"balance":"5","approx_local_messages":[1,9],"approx_cloud_messages":[2,2]}}'
-# additional: null / [] / scalar / empty-name / window 0 / one-window / >100
-for ADD in 'null' '[]' '[1,"x"]' '[{"limit_name":"","metered_feature":"codex_x","rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":18000}}}]' '[{"limit_name":"Z","rate_limit":{"primary_window":{"used_percent":99,"limit_window_seconds":0}}}]' '[{"limit_name":"One","rate_limit":{"secondary_window":{"used_percent":5,"limit_window_seconds":604800}}}]' '[{"limit_name":"Over","rate_limit":{"primary_window":{"used_percent":150,"limit_window_seconds":18000}}}]'; do
+# additional: null / [] / scalar / empty-name / window 0 / one-window / >100 / two-window / multi-entry
+for ADD in 'null' '[]' '[1,"x"]' '[{"limit_name":"","metered_feature":"codex_x","rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":18000}}}]' '[{"limit_name":"Z","rate_limit":{"primary_window":{"used_percent":99,"limit_window_seconds":0}}}]' '[{"limit_name":"One","rate_limit":{"secondary_window":{"used_percent":5,"limit_window_seconds":604800}}}]' '[{"limit_name":"Over","rate_limit":{"primary_window":{"used_percent":150,"limit_window_seconds":18000}}}]' '[{"limit_name":"Two","rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":18000},"secondary_window":{"used_percent":3,"limit_window_seconds":604800}}}]' '[{"limit_name":"M1","rate_limit":{"primary_window":{"used_percent":5,"limit_window_seconds":18000}}},{"limit_name":"M2","rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":18000}}}]'; do
   LBL="additional=$ADD (usage)";     R "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":5,\"reset_at\":9999999999,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":5,\"reset_at\":9999999999,\"limit_window_seconds\":604800}},\"additional_rate_limits\":$ADD}"
   LBL="additional=$ADD (remaining)"; R "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":5,\"reset_at\":9999999999,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":5,\"reset_at\":9999999999,\"limit_window_seconds\":604800}},\"additional_rate_limits\":$ADD}" --remaining --tooltip-pace-pts
 done
@@ -33,4 +33,11 @@ run_codexbar "$NORM" --remaining --format '{session_pct}% used'
 assert_text_has "remaining + user --format wins" "46% used"
 run_codexbar "$NORM" --remaining
 assert_text_has "remaining default bar shows remaining" "54%"
+# multi-entry additional: both render + a high-pct entry drives severity
+MULTI='{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":5,"reset_at":9999999999,"limit_window_seconds":18000},"secondary_window":{"used_percent":5,"reset_at":9999999999,"limit_window_seconds":604800}},"additional_rate_limits":[{"limit_name":"Alpha","rate_limit":{"primary_window":{"used_percent":10,"reset_at":9999999999,"limit_window_seconds":18000}}},{"limit_name":"Beta","rate_limit":{"primary_window":{"used_percent":95,"reset_at":9999999999,"limit_window_seconds":18000}}}]}'
+run_codexbar "$MULTI" --tooltip-pace-pts
+assert_exit0   "multi-entry: exit 0"
+assert_tip_has "multi-entry first name renders"  "Alpha"
+assert_tip_has "multi-entry second name renders" "Beta"
+assert_class   "multi-entry 95% drives critical" critical
 finish
