@@ -374,5 +374,6 @@ Adjust `padding` (inside the widget) and `margin` (outside the widget) in `~/.co
 - [claudebar](https://github.com/mryll/claudebar) — Claude AI usage widget for Waybar
 - [logibar](https://github.com/mryll/logibar) — Logitech battery widgets for Waybar
 - [meteobar](https://github.com/mryll/meteobar) — Weather widget for Waybar (Open-Meteo)
+- [tickerbar](https://github.com/mryll/tickerbar) — Multi-market price ticker for Waybar (crypto, stocks, forex)
 - [Omarchy](https://github.com/basecamp/omarchy) — Beautiful, modern & opinionated Linux distribution
 - [Waybar](https://github.com/Alexays/Waybar) — Status bar for Wayland compositors
