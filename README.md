@@ -5,7 +5,12 @@
 
 Waybar widget that displays your OpenAI Codex subscription usage — session (5h) limit, weekly limit, code review limit, and credits — with colored progress bars and countdown timers.
 
-![screenshot](screenshot.png)
+![codexbar in Waybar](screenshots/bar.png)
+
+<p align="center">
+  <em>A compact line in your bar — hover for the full usage breakdown:</em><br><br>
+  <img src="screenshot.png" alt="codexbar tooltip" width="320">
+</p>
 
 ## Features
 
