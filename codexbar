@@ -70,6 +70,7 @@ FORMAT_PACE_COLOR=false
 TOOLTIP_PACE_PTS=false
 REMAINING=false
 FORMAT_SET=false
+FRAME=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --icon)
@@ -82,6 +83,7 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--tooltip-format requires a value","class":"critical"}'; exit 0; }
             TOOLTIP_FORMAT="$2"; shift 2 ;;
         --remaining) REMAINING=true; shift ;;
+        --frame) FRAME=true; shift ;;
         --pace-tolerance)
             [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--pace-tolerance requires a value","class":"critical"}'; exit 0; }
             PACE_TOLERANCE="$2"; shift 2 ;;
@@ -1015,21 +1017,40 @@ else
     printf -v border_h '%*s' "$INNER_W" ''; border_h="${border_h// /─}"
 
     # Render tooltip
-    t=""
-    t+="${B}╭${border_h}╮${E}${NL}"
-    for line in "${lines[@]}"; do
-        if [[ "$line" == "SEP" ]]; then
-            t+="$(L "$sep")${NL}"
-        elif [[ "$line" == CENTER* ]]; then
-            t+="$(LC "${line#CENTER}")${NL}"
-        else
-            t+="$(L "$line")${NL}"
-        fi
-    done
-    t+="${B}╰${border_h}╯${E}"
+    if [[ "$FRAME" == "true" ]]; then
+        # Framed: draw the box; pinned to a Mono Nerd Font below so text,
+        # box-drawing and icons share one uniform advance regardless of bar font.
+        t=""
+        t+="${B}╭${border_h}╮${E}${NL}"
+        for line in "${lines[@]}"; do
+            if [[ "$line" == "SEP" ]]; then
+                t+="$(L "$sep")${NL}"
+            elif [[ "$line" == CENTER* ]]; then
+                t+="$(LC "${line#CENTER}")${NL}"
+            else
+                t+="$(L "$line")${NL}"
+            fi
+        done
+        t+="${B}╰${border_h}╯${E}"
+    else
+        # Plain (default): no border, no font pin → renders in the user's font.
+        t=""
+        for line in "${lines[@]}"; do
+            if [[ "$line" == "SEP" ]]; then
+                t+="${sep}${NL}"
+            elif [[ "$line" == CENTER* ]]; then
+                # Leading space aligns the title with the rule and section headers.
+                t+=" ${line#CENTER}${NL}"
+            else
+                t+="${line}${NL}"
+            fi
+        done
+        t="${t%"$NL"}"
+    fi
     if [[ -f "$stale_marker" ]]; then
         t+="${NL}<span foreground='${ORANGE}'>  ⏸  Stale — will refresh next cycle</span>"
     fi
+    [[ "$FRAME" == "true" ]] && t="<span font_family='JetBrainsMono Nerd Font Mono'>${t}</span>"
 fi
 
 # --- Output waybar JSON ---

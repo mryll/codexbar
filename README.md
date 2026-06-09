@@ -35,7 +35,7 @@ Waybar widget that displays your OpenAI Codex subscription usage — session (5h
 - [Codex CLI](https://github.com/openai/codex) — must be logged in (`codex login`)
 - `curl`, `jq`, GNU `date`, `base64` (standard on most Linux distros)
 - [Waybar](https://github.com/Alexays/Waybar)
-- A [Nerd Font](https://www.nerdfonts.com/) for tooltip icons
+- A [Nerd Font](https://www.nerdfonts.com/) for tooltip icons (recommended; required only for the framed tooltip — see [Framed tooltip](#framed-tooltip))
 - (Optional) [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF for the OpenAI brand icon
 
 ## Installation
@@ -339,6 +339,16 @@ always takes precedence.
 codexbar --remaining
 # bar: "54% · 3h 02m"  (instead of "46% · 3h 02m")
 ```
+
+### Framed tooltip
+
+By default the tooltip is **plain** (no border) and renders in your Waybar font, so it looks right with any font. Pass `--frame` to draw the bordered "card" instead:
+
+```bash
+codexbar --frame
+```
+
+Framed mode pins `JetBrainsMono Nerd Font Mono` so the box, bars and icons stay aligned regardless of your bar font — install a Nerd Font Mono (e.g. `ttf-jetbrains-mono-nerd`) for it to render correctly.
 
 ### Spacing
 
