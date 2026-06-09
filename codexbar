@@ -151,7 +151,7 @@ load_theme_colors() {
         if [[ -n "$foreground" && -n "$background" ]]; then
             DIM=$(hex_blend "$foreground" "$background")
         fi
-        MARKER="$DIM"
+        MARKER="$FG"
         # BAR_EMPTY = slightly lighter than background (blend bg with dim)
         if [[ -n "$background" ]]; then
             BAR_EMPTY=$(hex_blend "$background" "$DIM")
@@ -168,7 +168,7 @@ BLUE="#61afef"
 DIM="#5c6370"
 FG="#abb2bf"
 BAR_EMPTY="#3e4451"
-MARKER="#d19a66"
+MARKER="$FG"
 load_theme_colors
 
 # Bar text colors: CLI overrides > theme > One Dark defaults
@@ -330,7 +330,7 @@ make_bar() {
     printf -v f '%*s' "$pre_f" ''; printf -v e '%*s' "$(( m - pre_f ))" ''
     printf "<span foreground='%s'>%s</span><span foreground='%s'>%s</span>" \
         "$color" "${f// /█}" "$BAR_EMPTY" "${e// /░}"
-    printf "<span foreground='%s'>█</span>" "$marker_color"
+    printf "<span foreground='%s'>┃</span>" "$marker_color"
     printf -v f '%*s' "$post_f" ''; printf -v e '%*s' "$(( BAR_LEN - m - 1 - post_f ))" ''
     printf "<span foreground='%s'>%s</span><span foreground='%s'>%s</span>" \
         "$color" "${f// /█}" "$BAR_EMPTY" "${e// /░}"
@@ -672,9 +672,11 @@ fi
 if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
     _tip_session_pace="$session_pace_indicator"
     _tip_weekly_pace="$weekly_pace_indicator"
+    _tip_review_pace="$review_pace_indicator"
 else
     _tip_session_pace="$session_pace"
     _tip_weekly_pace="$weekly_pace"
+    _tip_review_pace="$review_pace"
 fi
 
 # --- Pace colors ---
@@ -825,6 +827,9 @@ else
 
     strip_tags() { sed 's/<[^>]*>//g' <<< "$1"; }
 
+    # Right-align a plain value label to a fixed column (width 6 fits "100% ↑").
+    _val_pad() { local w=6 n=${#1}; (( n > w )) && w=$n; printf '%*s' $(( w - n )) ''; }
+
     # Collect all content lines into an array
     lines=()
     _tip_title="Codex ${plan}"
@@ -833,12 +838,14 @@ else
     lines+=("SEP")
     lines+=("")
     lines+=(" <span foreground='${FG}'>  󰔟  Session</span>")
-    lines+=("   ${tip_session_bar}  <span font_weight='bold' foreground='${session_color}'>$(display_pct "$session_pct")% ${_tip_session_pace}</span>")
-    lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${s_cd}</span>")
+    _lbl_s="$(display_pct "$session_pct")% ${_tip_session_pace}"
+    lines+=("   ${tip_session_bar}  $(_val_pad "$_lbl_s")<span font_weight='bold' foreground='${session_color}'>${_lbl_s}</span>")
+    lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${s_cd}</span>")
     lines+=("")
     lines+=(" <span foreground='${FG}'>  󰃰  Weekly</span>")
-    lines+=("   ${tip_weekly_bar}  <span font_weight='bold' foreground='${weekly_color}'>$(display_pct "$weekly_pct")% ${_tip_weekly_pace}</span>")
-    lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${w_cd}</span>")
+    _lbl_w="$(display_pct "$weekly_pct")% ${_tip_weekly_pace}"
+    lines+=("   ${tip_weekly_bar}  $(_val_pad "$_lbl_w")<span font_weight='bold' foreground='${weekly_color}'>${_lbl_w}</span>")
+    lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${w_cd}</span>")
 
     if [[ "$has_review" == "true" ]]; then
         if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
@@ -849,8 +856,9 @@ else
         r_cd=$(countdown "$review_reset_at")
         lines+=("")
         lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>")
-        lines+=("   ${tip_review_bar}  <span font_weight='bold' foreground='${review_color}'>$(display_pct "$review_pct")%</span>")
-        lines+=(" <span foreground='${DIM}'>  ⏱  Resets in ${r_cd}</span>")
+        _lbl_r="$(display_pct "$review_pct")% ${_tip_review_pace}"
+        lines+=("   ${tip_review_bar}  $(_val_pad "$_lbl_r")<span font_weight='bold' foreground='${review_color}'>${_lbl_r}</span>")
+        lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${r_cd}</span>")
     fi
 
     if [[ -n "$additional_limits_tsv" ]]; then
@@ -885,8 +893,9 @@ else
                 add_primary_label=$(window_label_for_seconds "$add_primary_window" 0)
                 lines+=("")
                 lines+=(" <span foreground='${FG}'>  󰔟  ${add_primary_label^}</span>")
-                lines+=("   ${add_primary_bar}  <span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>$(display_pct "$add_primary_pct")% ${add_primary_tip_pace}</span>")
-                lines+=(" <span foreground='${DIM}'>  ⏱  Resets in $(countdown "$add_primary_reset")</span>")
+                _lbl_ap="$(display_pct "$add_primary_pct")% ${add_primary_tip_pace}"
+                lines+=("   ${add_primary_bar}  $(_val_pad "$_lbl_ap")<span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>${_lbl_ap}</span>")
+                lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_primary_reset")</span>")
             fi
 
             if (( add_secondary_window > 0 )); then
@@ -902,8 +911,9 @@ else
                 add_secondary_label=$(window_label_for_seconds "$add_secondary_window" 1)
                 lines+=("")
                 lines+=(" <span foreground='${FG}'>  󰃰  ${add_secondary_label^}</span>")
-                lines+=("   ${add_secondary_bar}  <span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>$(display_pct "$add_secondary_pct")% ${add_secondary_tip_pace}</span>")
-                lines+=(" <span foreground='${DIM}'>  ⏱  Resets in $(countdown "$add_secondary_reset")</span>")
+                _lbl_as="$(display_pct "$add_secondary_pct")% ${add_secondary_tip_pace}"
+                lines+=("   ${add_secondary_bar}  $(_val_pad "$_lbl_as")<span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>${_lbl_as}</span>")
+                lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_secondary_reset")</span>")
             fi
         done <<< "$additional_limits_tsv"
     fi
