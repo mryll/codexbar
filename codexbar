@@ -71,6 +71,7 @@ TOOLTIP_PACE_PTS=false
 REMAINING=false
 FORMAT_SET=false
 FRAME=false
+FRAME_FONT="JetBrainsMono Nerd Font Mono"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --icon)
@@ -84,6 +85,8 @@ while [[ $# -gt 0 ]]; do
             TOOLTIP_FORMAT="$2"; shift 2 ;;
         --remaining) REMAINING=true; shift ;;
         --frame) FRAME=true; shift ;;
+        --frame-font) [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--frame-font requires a value","class":"critical"}'; exit 0; }
+                      FRAME_FONT="$2"; shift 2 ;;
         --pace-tolerance)
             [[ $# -ge 2 ]] || { echo '{"text":"⚠","tooltip":"--pace-tolerance requires a value","class":"critical"}'; exit 0; }
             PACE_TOLERANCE="$2"; shift 2 ;;
@@ -1050,7 +1053,10 @@ else
     if [[ -f "$stale_marker" ]]; then
         t+="${NL}<span foreground='${ORANGE}'>  ⏸  Stale — will refresh next cycle</span>"
     fi
-    [[ "$FRAME" == "true" ]] && t="<span font_family='JetBrainsMono Nerd Font Mono'>${t}</span>"
+    if [[ "$FRAME" == "true" ]]; then
+        _ff=$(sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/'\''/\&apos;/g' <<< "$FRAME_FONT")
+        t="<span font_family='${_ff}'>${t}</span>"
+    fi
 fi
 
 # --- Output waybar JSON ---
