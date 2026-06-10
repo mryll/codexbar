@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Regression guard: no --remaining flag => output identical to the pre-feature
-# script. A stored golden can't work (the tooltip embeds wall-clock time:
+# Regression guard: default output identical to the last commit with an
+# intentionally accepted output (bump BASE_REF when a release changes the output
+# on purpose). A stored golden can't work (the tooltip embeds wall-clock time:
 # "Updated HH:MM" + time-relative countdowns), so we run BOTH the base-commit
 # script and the current script in the same instant and compare. Same `now` =>
 # countdowns match; we normalize the "Updated HH:MM" minute for the rare case
@@ -8,7 +9,7 @@
 # unaffected).
 source "$(dirname "$0")/lib.sh"
 
-BASE_REF="${BASE_REF:-640f118}"   # master tip when feature/remaining-mode was created
+BASE_REF="${BASE_REF:-cc28df1}"   # v0.5.0 — plain tooltip default + --frame/--frame-font
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 FIX="$(cat "$(dirname "$0")/fixtures/baseline.json")"
 
