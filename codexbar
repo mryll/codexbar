@@ -115,6 +115,8 @@ CLIENT_ID="app_EMoamEEZ73f0CkXaXp7hrann" # Codex CLI OAuth client ID
 REFRESH_BUFFER=300 # refresh 5 min before expiry
 CACHE_DIR="$HOME/.cache/codexbar"
 CACHE_TTL=60 # seconds
+NET_RETRIES=3     # attempts for transient (no-HTTP-response) network failures
+NET_RETRY_DELAY=3 # seconds between attempts
 
 # --- Theme colors ---
 # Blend two hex colors (#RRGGBB) by averaging their RGB components
@@ -458,15 +460,21 @@ transient_stale=false
 
 if (( expires_s < now_s + REFRESH_BUFFER )); then
     # Synchronous refresh — 25s timeout covers cold boot when DHCP is still settling.
+    # Transient failures (no HTTP response) are retried — same policy as the
+    # usage fetch — so a cold-boot network race doesn't cost a full interval.
     refresh_body=$(jq -nc --arg ci "$CLIENT_ID" --arg rt "$refresh_token" \
                      '{client_id:$ci, grant_type:"refresh_token", refresh_token:$rt, scope:"openid profile email"}')
-    refresh_raw=$(curl -s --max-time 25 -w '\n%{http_code}' -X POST "$TOKEN_URL" \
-        -H "Content-Type: application/json" \
-        --data "$refresh_body") || true
-    refresh_code="${refresh_raw##*$'\n'}"
-    resp="${refresh_raw%$'\n'"$refresh_code"}"
-    # Normalize bogus codes (e.g. raw body without curl write-out suffix) to 000.
-    [[ "$refresh_code" =~ ^[0-9]{3}$ ]] || refresh_code="000"
+    for (( _try = 1; _try <= NET_RETRIES; _try++ )); do
+        refresh_raw=$(curl -s --max-time 25 -w '\n%{http_code}' -X POST "$TOKEN_URL" \
+            -H "Content-Type: application/json" \
+            --data "$refresh_body") || true
+        refresh_code="${refresh_raw##*$'\n'}"
+        resp="${refresh_raw%$'\n'"$refresh_code"}"
+        # Normalize bogus codes (e.g. raw body without curl write-out suffix) to 000.
+        [[ "$refresh_code" =~ ^[0-9]{3}$ ]] || refresh_code="000"
+        if [[ "$refresh_code" != "000" ]]; then break; fi
+        if (( _try < NET_RETRIES )); then sleep "$NET_RETRY_DELAY"; fi
+    done
 
     if [[ "$refresh_code" == "200" ]] && [[ -n "$resp" ]] && jq -e '.access_token' <<< "$resp" &>/dev/null; then
         new_at=$(jq -r '.access_token // empty' <<< "$resp")
@@ -540,17 +548,36 @@ _fetch_usage() {
         return
     fi
 
+    # Transient failures (no HTTP response: DHCP/DNS still settling at boot,
+    # brief blip) are retried before giving up — one missed dispatch otherwise
+    # means stale data for a full Waybar interval.
     _fetch_args=(-s --max-time 10 -w $'\n%{http_code}' "$API_URL" -H "Authorization: Bearer $access_token")
     [[ -n "$account_id" ]] && _fetch_args+=(-H "chatgpt-account-id: $account_id")
-    _resp_body=$(curl "${_fetch_args[@]}") || true
-    _http_code="${_resp_body##*$'\n'}"
-    _resp_body="${_resp_body%$'\n'"$_http_code"}"
+    for (( _try = 1; _try <= NET_RETRIES; _try++ )); do
+        _resp_body=$(curl "${_fetch_args[@]}") || true
+        _http_code="${_resp_body##*$'\n'}"
+        _resp_body="${_resp_body%$'\n'"$_http_code"}"
+        # Normalize bogus codes (e.g. raw body without curl write-out suffix) to 000.
+        [[ "$_http_code" =~ ^[0-9]{3}$ ]] || _http_code="000"
+        if [[ "$_http_code" != "000" ]]; then break; fi
+        if (( _try < NET_RETRIES )); then sleep "$NET_RETRY_DELAY"; fi
+    done
 
     if [[ "$_http_code" == "200" ]] && [[ -n "$_resp_body" ]] && jq -e '.rate_limit' <<< "$_resp_body" &>/dev/null; then
         usage="$_resp_body"
         _ctmp=$(mktemp "$CACHE_DIR/.usage.XXXXXX")
         printf '%s' "$usage" > "$_ctmp" && mv "$_ctmp" "$cache_file"
         rm -f "$stale_marker" "$CACHE_DIR/.last_error"
+    elif [[ "$_http_code" == "000" ]]; then
+        # No HTTP response after retries — network still settling or offline.
+        # Same transient handling as the refresh path: reuse recent cache with
+        # an in-memory stale flag (no disk markers), or show neutral "Loading…".
+        if [[ -f "$cache_file" ]] && (( cache_age <= WEEKLY_WINDOW )); then
+            usage=$(<"$cache_file")
+            transient_stale=true
+        else
+            loading_network
+        fi
     elif [[ -f "$cache_file" ]]; then
         usage=$(<"$cache_file")
         touch "$stale_marker"
