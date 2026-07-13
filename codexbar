@@ -50,6 +50,10 @@
 #   {credits_cloud}     Approx cloud messages remaining
 #
 # Default format: "{session_pct}% · {session_reset}"
+# Note: {session_*} maps to the API's primary rate-limit window and {weekly_*}
+#       to the secondary one. When the API exposes a single weekly window
+#       (primary ≈ 7 days, secondary null), {weekly_*} mirrors the primary
+#       window so both placeholder families report the real weekly usage.
 # Note: bar placeholders are colored by their own window's usage, independent of
 #       the surrounding bar text color (which reflects the worst window).
 # Note: --remaining            Show "what's left": default bar + tooltip flip to remaining
@@ -287,6 +291,23 @@ window_label_for_seconds() {
     else
         printf 'usage'
     fi
+}
+
+# Tooltip label for a main rate-limit window, derived from its real duration
+# (the API no longer guarantees primary=5h/secondary=weekly). The 5h window
+# keeps its historical "Session" name.
+main_window_label() {  # <seconds> <is_secondary>
+    local label
+    label=$(window_label_for_seconds "$1" "$2")
+    [[ "$label" == "5h" ]] && label="session"
+    printf '%s' "${label^}"
+}
+
+main_window_icon() {  # <label from main_window_label>
+    case "$1" in
+        Weekly|Monthly|Annual) printf '󰃰' ;;
+        *) printf '󰔟' ;;
+    esac
 }
 
 remaining_pct_for() {
@@ -691,6 +712,16 @@ weekly_reset_at=$(jq -r 'try (((.rate_limit.secondary_window.reset_at | numbers)
 weekly_window_s=$(jq -r 'try (((.rate_limit.secondary_window.limit_window_seconds | numbers) // 604800) | floor | if (. > 1e12 or . < 0) then 0 else . end) catch 604800' <<< "$usage")
 (( session_window_s > 0 )) || session_window_s=$SESSION_WINDOW
 (( weekly_window_s > 0 )) || weekly_window_s=$WEEKLY_WINDOW
+has_secondary=$(jq 'try ((.rate_limit.secondary_window | type) == "object") catch false' <<< "$usage")
+# Newer API responses expose a single weekly limit: primary_window carries it
+# (limit_window_seconds ≈ 7d) and secondary_window is null. Mirror the primary
+# into the weekly fields so {weekly_*} placeholders keep reporting real usage
+# instead of a misleading 0%.
+if [[ "$has_secondary" == "false" ]] && is_approx_window "$session_window_s" "$WEEKLY_WINDOW"; then
+    weekly_pct=$session_pct
+    weekly_reset_at=$session_reset_at
+    weekly_window_s=$session_window_s
+fi
 session_remaining_pct=$(remaining_pct_for "$session_pct")
 weekly_remaining_pct=$(remaining_pct_for "$weekly_pct")
 
@@ -969,15 +1000,19 @@ else
     lines+=("CENTER<span font_weight='bold' foreground='${BLUE}'>${_tip_title}</span>")
     lines+=("SEP")
     lines+=("")
-    lines+=(" <span foreground='${FG}'>  󰔟  Session</span>")
+    session_label=$(main_window_label "$session_window_s" 0)
+    lines+=(" <span foreground='${FG}'>  $(main_window_icon "$session_label")  ${session_label}</span>")
     _lbl_s="$(display_pct "$session_pct")% ${_tip_session_pace}"
     lines+=("   ${tip_session_bar}  $(_val_pad "$_lbl_s")<span font_weight='bold' foreground='${session_color}'>${_lbl_s}</span>")
     lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${s_cd}</span>")
-    lines+=("")
-    lines+=(" <span foreground='${FG}'>  󰃰  Weekly</span>")
-    _lbl_w="$(display_pct "$weekly_pct")% ${_tip_weekly_pace}"
-    lines+=("   ${tip_weekly_bar}  $(_val_pad "$_lbl_w")<span font_weight='bold' foreground='${weekly_color}'>${_lbl_w}</span>")
-    lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${w_cd}</span>")
+    if [[ "$has_secondary" == "true" ]]; then
+        weekly_label=$(main_window_label "$weekly_window_s" 1)
+        lines+=("")
+        lines+=(" <span foreground='${FG}'>  $(main_window_icon "$weekly_label")  ${weekly_label}</span>")
+        _lbl_w="$(display_pct "$weekly_pct")% ${_tip_weekly_pace}"
+        lines+=("   ${tip_weekly_bar}  $(_val_pad "$_lbl_w")<span font_weight='bold' foreground='${weekly_color}'>${_lbl_w}</span>")
+        lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${w_cd}</span>")
+    fi
 
     if [[ "$has_review" == "true" ]]; then
         if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then

@@ -4,6 +4,9 @@ R(){ run_codexbar "$1" "${@:2}"; assert_exit0 "$LBL"; assert_json_valid "$LBL"; 
 
 # minimal Plus
 LBL="minimal plus"; R '{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":46,"reset_at":9999999999,"limit_window_seconds":18000},"secondary_window":{"used_percent":47,"reset_at":9999999999,"limit_window_seconds":604800}}}'
+# mid-2026 API shape: single weekly primary window, null secondary/review/additional
+LBL="single weekly window"; R '{"plan_type":"plus","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":7,"limit_window_seconds":604800,"reset_after_seconds":594794,"reset_at":9999999999},"secondary_window":null},"code_review_rate_limit":null,"additional_rate_limits":null,"credits":{"has_credits":false,"unlimited":false,"overage_limit_reached":false,"balance":"0","approx_local_messages":[0,0],"approx_cloud_messages":[0,0]},"spend_control":{"reached":false,"individual_limit":null},"rate_limit_reached_type":null,"promo":null,"referral_beacon":null,"rate_limit_reset_credits":{"available_count":3}}'
+LBL="null secondary, non-weekly primary"; R '{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":7,"limit_window_seconds":18000,"reset_at":9999999999},"secondary_window":null}}'
 # code review present
 LBL="review present"; R '{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":1,"reset_at":9999999999,"limit_window_seconds":18000},"secondary_window":{"used_percent":1,"reset_at":9999999999,"limit_window_seconds":604800}},"code_review_rate_limit":{"primary_window":{"used_percent":4,"reset_at":9999999999,"limit_window_seconds":604800}}}'
 # credits unlimited + ranges
