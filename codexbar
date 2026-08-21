@@ -624,9 +624,11 @@ window_label_for_seconds() {
     fi
 }
 
-# Tooltip label for a main rate-limit window, derived from its real duration
-# (the API no longer guarantees primary=5h/secondary=weekly). The 5h window
-# keeps its historical "Session" name.
+# Display label for a rate-limit window, derived from its real duration (the
+# API no longer guarantees primary=5h/secondary=weekly). The 5h window keeps
+# its historical "Session" name — EVERY 5h window, including the ones hanging
+# off an additional meter: the same duration answering to two different names
+# in one tooltip is the kind of thing a reader has to stop and decode.
 main_window_label() {  # <seconds> <is_secondary>
     local label
     label=$(window_label_for_seconds "$1" "$2")
@@ -1303,14 +1305,14 @@ if [[ "$JSON_MODE" == "true" ]]; then
             (( ap_window > 0 || as_window > 0 )) || continue
             if (( ap_window > 0 )); then
                 _add_pace=$(calc_pacing "$ap_pct" "$ap_reset" "$ap_window")
-                _add_lbl=$(window_label_for_seconds "$ap_window" 0)
-                _win_objs+=("$(json_window "additional_${_add_i}_primary" "${_add_lbl^}" "$add_name" \
+                _add_lbl=$(main_window_label "$ap_window" 0)
+                _win_objs+=("$(json_window "additional_${_add_i}_primary" "$_add_lbl" "$add_name" \
                     "$ap_pct" "$ap_reset" "$ap_window" "$_add_pace")")
             fi
             if (( as_window > 0 )); then
                 _add_pace=$(calc_pacing "$as_pct" "$as_reset" "$as_window")
-                _add_lbl=$(window_label_for_seconds "$as_window" 1)
-                _win_objs+=("$(json_window "additional_${_add_i}_secondary" "${_add_lbl^}" "$add_name" \
+                _add_lbl=$(main_window_label "$as_window" 1)
+                _win_objs+=("$(json_window "additional_${_add_i}_secondary" "$_add_lbl" "$add_name" \
                     "$as_pct" "$as_reset" "$as_window" "$_add_pace")")
             fi
             _add_i=$(( _add_i + 1 ))
@@ -1607,9 +1609,9 @@ else
                     add_primary_tip_pace="$add_primary_pace"
                     add_primary_bar=$(display_bar "$add_primary_pct" "$add_primary_elapsed")
                 fi
-                add_primary_label=$(window_label_for_seconds "$add_primary_window" 0)
+                add_primary_label=$(main_window_label "$add_primary_window" 0)
                 lines+=("")
-                lines+=(" <span foreground='${FG}'>  󰔟  ${add_primary_label^}</span>")
+                lines+=(" <span foreground='${FG}'>  󰔟  ${add_primary_label}</span>")
                 _lbl_ap="$(display_pct "$add_primary_pct")%"
                 lines+=("   ${add_primary_bar}  $(_val_pad "$_lbl_ap")<span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>${_lbl_ap}</span>")
                 lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_primary_reset")</span><span foreground='${DIM}'>  ·  ${add_primary_indicator} ${add_primary_pts}</span>")
@@ -1626,9 +1628,9 @@ else
                     add_secondary_tip_pace="$add_secondary_pace"
                     add_secondary_bar=$(display_bar "$add_secondary_pct" "$add_secondary_elapsed")
                 fi
-                add_secondary_label=$(window_label_for_seconds "$add_secondary_window" 1)
+                add_secondary_label=$(main_window_label "$add_secondary_window" 1)
                 lines+=("")
-                lines+=(" <span foreground='${FG}'>  󰃰  ${add_secondary_label^}</span>")
+                lines+=(" <span foreground='${FG}'>  󰃰  ${add_secondary_label}</span>")
                 _lbl_as="$(display_pct "$add_secondary_pct")%"
                 lines+=("   ${add_secondary_bar}  $(_val_pad "$_lbl_as")<span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>${_lbl_as}</span>")
                 lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_secondary_reset")</span><span foreground='${DIM}'>  ·  ${add_secondary_indicator} ${add_secondary_pts}</span>")

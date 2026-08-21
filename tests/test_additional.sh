@@ -28,18 +28,20 @@ run_codexbar "$SPARK" --tooltip-pace-pts
 assert_exit0      "spark two-window: exit 0"
 assert_json_valid "spark two-window: valid JSON"
 assert_tip_has    "spark model name shown" "GPT-5.3-Codex-Spark"
-# icon attached to the right window — stronger than bare '5h'/'Weekly'
-# ('Weekly' alone also matches the top-level block); also asserts ${label^}
-assert_tip_has    "primary window header has 5h icon"     "󰔟  5h"
+# icon attached to the right window — stronger than a bare name ('Weekly'
+# alone also matches the top-level block). A 5h window is called "Session"
+# HERE TOO: the same duration answering to two names in one tooltip is the
+# kind of thing a reader has to stop and decode.
+assert_tip_has    "primary window header is Session"      "󰔟  Session"
 assert_tip_has    "secondary window header has Weekly icon" "󰃰  Weekly"
 # label moved out of the reset line into the header (new layout vs old)
 assert_tip_lacks  "old primary reset prefix gone"   "5h resets in"
 assert_tip_lacks  "old secondary reset prefix gone" "Weekly resets in"
 assert_tip_has    "reset line still present" "Resets in"
-# block emits in order: model -> 5h header -> bar -> reset -> Weekly header -> bar -> reset
+# block emits in order: model -> Session header -> bar -> reset -> Weekly header -> bar -> reset
 if _plain .tooltip | awk '
   /GPT-5.3-Codex-Spark/ { s=1 }
-  s && /󰔟  5h/     && st==0 { st=1; next }
+  s && /󰔟  Session/ && st==0 { st=1; next }
   s && /%/          && st==1 { st=2; next }
   s && /Resets in/  && st==2 { st=3; next }
   s && /󰃰  Weekly/ && st==3 { st=4; next }
