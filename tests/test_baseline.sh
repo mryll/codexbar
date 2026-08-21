@@ -9,7 +9,7 @@
 # unaffected).
 source "$(dirname "$0")/lib.sh"
 
-BASE_REF="${BASE_REF:-cc28df1}"   # v0.5.0 — plain tooltip default + --frame/--frame-font
+BASE_REF="${BASE_REF:-0db9f78}"   # design pass: the pace arrow moved to the text that explains it
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 FIX="$(cat "$(dirname "$0")/fixtures/baseline.json")"
 
