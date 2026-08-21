@@ -8,7 +8,7 @@ codexbar shows your use of the OpenAI Codex subscription in your status bar. It 
 codexbar runs in two places: as a Waybar module, and as a native plugin for the [Omarchy](https://github.com/basecamp/omarchy) shell. One script supplies both.
 
 <p align="center">
-  <img src="screenshots/omarchy-panel.png" alt="The Omarchy panel: one meter for each usage window" width="360">
+  <img src="screenshots/omarchy-panel.png" alt="The Omarchy panel: one meter for each usage window" width="342">
 </p>
 
 ## Contents
@@ -72,7 +72,7 @@ curl -fsSL https://raw.githubusercontent.com/mryll/codexbar/master/codexbar \
 ```
 
 <p align="center">
-  <img src="screenshots/waybar-bar.png" alt="codexbar in Waybar" width="800">
+  <img src="screenshots/waybar-bar.png" alt="codexbar in Waybar" width="144">
 </p>
 
 ## Quick start
@@ -95,7 +95,7 @@ Add the module to `~/.config/waybar/config.jsonc`:
 The bar shows your session use and the time until the reset. Put the pointer on the module to see all of your limits:
 
 <p align="center">
-  <img src="screenshots/waybar-tooltip.png" alt="The Waybar tooltip, with one bar for each limit" width="330">
+  <img src="screenshots/waybar-tooltip.png" alt="The Waybar tooltip, with one bar for each limit" width="315">
 </p>
 
 ## Configuration
@@ -153,7 +153,11 @@ codexbar --remaining                                   # 58% · 1h 30m
 The plugin gives you a real user interface instead of a text tooltip. The bar shows the Codex icon and one percentage. A click opens a panel with one meter for each window. Each meter has an animated bar with a mark for the pace, the percentage, the time until the reset, and the credits.
 
 <p align="center">
-  <img src="screenshots/omarchy-bar.png" alt="The widget in the Omarchy bar" width="480">
+  <img src="screenshots/omarchy-desktop.png" alt="codexbar in the Omarchy bar, with its panel open" width="960">
+</p>
+
+<p align="center">
+  <img src="screenshots/omarchy-bar.png" alt="The widget in the Omarchy bar" width="68">
 </p>
 
 Install the plugin. Then add the plugin to your bar:

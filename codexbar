@@ -426,10 +426,13 @@ die() {
         fi
         exit 0
     fi
+    # Waybar tooltip: turn the callers' literal \n into a real newline so the
+    # second line renders as a line break instead of showing "\n" verbatim.
+    local _tip="${1//\\n/$'\n'}"
     if command -v jq &>/dev/null; then
-        jq -nc --arg t "⚠" --arg tip "$1" '{text:$t, tooltip:$tip, class:"critical"}'
+        jq -nc --arg t "⚠" --arg tip "$_tip" '{text:$t, tooltip:$tip, class:"critical"}'
     else
-        local _m="${1//\\/\\\\}"; _m="${_m//\"/\\\"}"
+        local _m="${_tip//\\/\\\\}"; _m="${_m//\"/\\\"}"; _m="${_m//$'\n'/\\n}"
         printf '{"text":"⚠","tooltip":"%s","class":"critical"}\n' "$_m"
     fi
     exit 0
@@ -704,7 +707,7 @@ countdown() {
 calc_pacing() {
     local usage_pct=$1 reset_at=$2 window_s=$3
     local elapsed_pct=0 pace_icon="→" pace_indicator="→" pace_delta="0"
-    local pace_pct_label="on track" pace_pts_label="on track"
+    local pace_pct_label="on pace" pace_pts_label="on pace"
 
     if [[ -n "$reset_at" && "$reset_at" != "0" && "$reset_at" != "null" ]] && (( window_s > 0 )); then
         local now_epoch secs_left
@@ -1478,16 +1481,16 @@ else
     lines+=("")
     session_label=$(main_window_label "$session_window_s" 0)
     lines+=(" <span foreground='${FG}'>  $(main_window_icon "$session_label")  ${session_label}</span>")
-    _lbl_s="$(display_pct "$session_pct")% ${_tip_session_pace}"
+    _lbl_s="$(display_pct "$session_pct")%"
     lines+=("   ${tip_session_bar}  $(_val_pad "$_lbl_s")<span font_weight='bold' foreground='${session_color}'>${_lbl_s}</span>")
-    lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${s_cd}</span>")
+    lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${s_cd}</span><span foreground='${DIM}'>  ·  ${session_pace_indicator} ${session_pace_pts}</span>")
     if [[ "$has_secondary" == "true" ]]; then
         weekly_label=$(main_window_label "$weekly_window_s" 1)
         lines+=("")
         lines+=(" <span foreground='${FG}'>  $(main_window_icon "$weekly_label")  ${weekly_label}</span>")
-        _lbl_w="$(display_pct "$weekly_pct")% ${_tip_weekly_pace}"
+        _lbl_w="$(display_pct "$weekly_pct")%"
         lines+=("   ${tip_weekly_bar}  $(_val_pad "$_lbl_w")<span font_weight='bold' foreground='${weekly_color}'>${_lbl_w}</span>")
-        lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${w_cd}</span>")
+        lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${w_cd}</span><span foreground='${DIM}'>  ·  ${weekly_pace_indicator} ${weekly_pace_pts}</span>")
     fi
 
     if [[ "$has_review" == "true" ]]; then
@@ -1499,9 +1502,9 @@ else
         r_cd=$(countdown "$review_reset_at")
         lines+=("")
         lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>")
-        _lbl_r="$(display_pct "$review_pct")% ${_tip_review_pace}"
+        _lbl_r="$(display_pct "$review_pct")%"
         lines+=("   ${tip_review_bar}  $(_val_pad "$_lbl_r")<span font_weight='bold' foreground='${review_color}'>${_lbl_r}</span>")
-        lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${r_cd}</span>")
+        lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${r_cd}</span><span foreground='${DIM}'>  ·  ${review_pace_indicator} ${review_pace_pts}</span>")
     fi
 
     if [[ -n "$additional_limits_tsv" ]]; then
@@ -1526,6 +1529,7 @@ else
             if (( add_primary_window > 0 )); then
                 _add_primary_pace=$(calc_pacing "$add_primary_pct" "$add_primary_reset" "$add_primary_window")
                 read -r add_primary_elapsed add_primary_pace add_primary_indicator _discard <<< "$_add_primary_pace"
+                add_primary_pts=$(cut -d' ' -f7-8 <<< "$_add_primary_pace")
                 if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
                     add_primary_tip_pace="$add_primary_indicator"
                     add_primary_bar=$(display_bar "$add_primary_pct" "$add_primary_elapsed" marker)
@@ -1536,14 +1540,15 @@ else
                 add_primary_label=$(window_label_for_seconds "$add_primary_window" 0)
                 lines+=("")
                 lines+=(" <span foreground='${FG}'>  󰔟  ${add_primary_label^}</span>")
-                _lbl_ap="$(display_pct "$add_primary_pct")% ${add_primary_tip_pace}"
+                _lbl_ap="$(display_pct "$add_primary_pct")%"
                 lines+=("   ${add_primary_bar}  $(_val_pad "$_lbl_ap")<span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>${_lbl_ap}</span>")
-                lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_primary_reset")</span>")
+                lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_primary_reset")</span><span foreground='${DIM}'>  ·  ${add_primary_indicator} ${add_primary_pts}</span>")
             fi
 
             if (( add_secondary_window > 0 )); then
                 _add_secondary_pace=$(calc_pacing "$add_secondary_pct" "$add_secondary_reset" "$add_secondary_window")
                 read -r add_secondary_elapsed add_secondary_pace add_secondary_indicator _discard <<< "$_add_secondary_pace"
+                add_secondary_pts=$(cut -d' ' -f7-8 <<< "$_add_secondary_pace")
                 if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
                     add_secondary_tip_pace="$add_secondary_indicator"
                     add_secondary_bar=$(display_bar "$add_secondary_pct" "$add_secondary_elapsed" marker)
@@ -1554,9 +1559,9 @@ else
                 add_secondary_label=$(window_label_for_seconds "$add_secondary_window" 1)
                 lines+=("")
                 lines+=(" <span foreground='${FG}'>  󰃰  ${add_secondary_label^}</span>")
-                _lbl_as="$(display_pct "$add_secondary_pct")% ${add_secondary_tip_pace}"
+                _lbl_as="$(display_pct "$add_secondary_pct")%"
                 lines+=("   ${add_secondary_bar}  $(_val_pad "$_lbl_as")<span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>${_lbl_as}</span>")
-                lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_secondary_reset")</span>")
+                lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_secondary_reset")</span><span foreground='${DIM}'>  ·  ${add_secondary_indicator} ${add_secondary_pts}</span>")
             fi
         done <<< "$additional_limits_tsv"
     fi

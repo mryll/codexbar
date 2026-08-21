@@ -283,12 +283,13 @@ Panel {
     return ms <= 0 ? "Resets now" : "Resets in " + formatDuration(ms)
   }
 
+  // Arrow and text both come from the SIGN of the delta, so they can never
+  // disagree. The tolerance band lives in the state and paints only the COLOR.
   function paceText(w) {
     if (!w || !w.pace) return ""
-    var p = w.pace
-    if (p.state === "ahead") return "↑ " + String(p.points_label || "")
-    if (p.state === "under") return "↓ " + String(p.points_label || "")
-    return "→ on pace"
+    var d = Number(w.pace.delta_points)
+    if (!isFinite(d) || d === 0) return "→ on pace"
+    return (d > 0 ? "↑ " : "↓ ") + String(w.pace.points_label || "")
   }
 
   // Same bands pace_color_for uses in codexbar, mapped onto theme colors.
