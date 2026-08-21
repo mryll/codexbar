@@ -13,4 +13,5 @@
 - `set -euo pipefail` is active — unset variables and failed pipes are fatal
 - Cache lives at `~/.cache/codexbar/`; auth at `~/.codex/auth.json`
 - Concurrent instances are serialized with `flock` (multi-monitor support)
-- Theme colors auto-load from Omarchy (`~/.config/omarchy/current/theme/colors.toml`) with One Dark fallback
+- Color chain (first match wins): `--color-*` flags > Omarchy theme (`~/.local/state/omarchy/current/theme/colors.toml`, legacy `~/.config/...`) > pywal (`${XDG_CACHE_HOME:-$HOME/.cache}/wal/colors.json`) > One Dark built-ins. Every step degrades silently; the resolved anchors are published as `palette` in `--json` so the Quickshell panel draws the same gauge
+- `IFS=$'\t' read` collapses runs of empty fields (TAB is IFS whitespace) — emit a sentinel from `jq`, never an empty TSV field

@@ -3,40 +3,48 @@
 [![AUR version](https://img.shields.io/aur/version/codexbar)](https://aur.archlinux.org/packages/codexbar)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Waybar widget that displays your OpenAI Codex subscription usage — session (5h) limit, weekly limit, code review limit, and credits — with colored progress bars and countdown timers.
+codexbar shows your use of the OpenAI Codex subscription in your status bar. It reads every limit that the Codex API reports. These limits are the session (5h) window, the weekly window, code review, the per-model meters, and the credits balance. It also gives you a warning before a limit stops your work.
+
+codexbar runs in two places: as a Waybar module, and as a native plugin for the [Omarchy](https://github.com/basecamp/omarchy) shell. One script supplies both.
 
 <p align="center">
-  <img src="screenshots/bar.png" alt="codexbar in Waybar" width="800">
+  <img src="screenshots/omarchy-panel.png" alt="The Omarchy panel: one meter for each usage window" width="360">
 </p>
 
-<p align="center">
-  <em>A compact line in your bar — hover for the full usage breakdown:</em><br><br>
-  <img src="screenshot.png" alt="codexbar tooltip" width="800">
-</p>
+## Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Omarchy shell plugin](#omarchy-shell-plugin)
+- [Theming](#theming)
+- [Monochrome mode](#monochrome-mode)
+- [Structured JSON output](#structured-json-output)
+- [How it works](#how-it-works)
+- [Troubleshooting](#troubleshooting)
+- [Related](#related)
 
 ## Features
 
-- Session (5h) and weekly usage with progress bars
-- Additional Codex model-specific usage meters in the tooltip
-- Code review usage tracking
-- Credits balance display
-- Pacing indicators — ratio-based and point-based, with optional per-window coloring
-- Tooltip elapsed markers — visual pacing reference in progress bars
-- Colored severity levels (green → yellow → orange → red)
-- Rich Pango tooltip with box-drawing borders
-- Token auto-refresh with background sync
-- Response cache (60s TTL) — fast even on multi-monitor setups
-- Graceful fallback on network errors
-- Pure Bash — no runtime dependencies beyond `curl`, `jq`, GNU `date`, and `base64`
-- Works with any Waybar setup (Hyprland, Sway, etc.)
+- Every limit that the API reports: session (5h), weekly, code review, per-model meters, and credits
+- A color gauge from green to red. The color of a value is always the same, so you can read it quickly
+- Pace indicators that compare your use with the elapsed time, so you know if your use is too fast
+- An alarm dot when a limit that you do not see on the bar is almost full
+- codexbar follows your Omarchy theme, or your pywal colors
+- Monochrome mode, for a bar without color
+- Structured JSON output for your own scripts
+- Token refresh in the background, and a 60-second cache, so many monitors stay fast
+- Pure Bash. It needs only `curl`, `jq`, GNU `date`, and `base64`
 
 ## Requirements
 
-- [Codex CLI](https://github.com/openai/codex) — must be logged in (`codex login`)
-- `curl`, `jq`, GNU `date`, `base64` (standard on most Linux distros)
-- [Waybar](https://github.com/Alexays/Waybar)
-- A [Nerd Font](https://www.nerdfonts.com/) for tooltip icons (recommended; required only for the framed tooltip — see [Framed tooltip](#framed-tooltip))
-- (Optional) [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF for the OpenAI brand icon
+- [Codex CLI](https://github.com/openai/codex), with a login (`codex login`)
+- `curl`, `jq`, GNU `date`, and `base64`
+- [Waybar](https://github.com/Alexays/Waybar), or the Omarchy shell
+- A [Nerd Font](https://www.nerdfonts.com/), for the icons in the tooltip
+- Optional: [Font Awesome](https://fontawesome.com/) 7.0.0 or later (OTF), for the OpenAI icon
 
 ## Installation
 
@@ -54,28 +62,22 @@ cd codexbar
 make install PREFIX=~/.local
 ```
 
-Or system-wide:
+To install codexbar for all users, use `sudo make install`. To remove codexbar, use `make uninstall PREFIX=~/.local`.
 
-```bash
-sudo make install
-```
-
-To uninstall:
-
-```bash
-make uninstall PREFIX=~/.local
-```
-
-### Quick install
+### One file
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mryll/codexbar/master/codexbar \
   -o ~/.local/bin/codexbar && chmod +x ~/.local/bin/codexbar
 ```
 
+<p align="center">
+  <img src="screenshots/waybar-bar.png" alt="codexbar in Waybar" width="800">
+</p>
+
 ## Quick start
 
-Add the module to your `~/.config/waybar/config.jsonc`:
+Add the module to `~/.config/waybar/config.jsonc`:
 
 ```jsonc
 "modules-right": ["custom/codexbar", ...],
@@ -90,304 +92,242 @@ Add the module to your `~/.config/waybar/config.jsonc`:
 }
 ```
 
+The bar shows your session use and the time until the reset. Put the pointer on the module to see all of your limits:
+
+<p align="center">
+  <img src="screenshots/waybar-tooltip.png" alt="The Waybar tooltip, with one bar for each limit" width="330">
+</p>
+
 ## Configuration
 
-### Icon
+| Flag | What it does |
+|---|---|
+| `--icon ICON` | Puts an icon before the text |
+| `--format FORMAT` | Sets the bar text. Default: `{session_pct}% · {session_reset}` |
+| `--tooltip-format FORMAT` | Replaces the tooltip with your own text |
+| `--remaining` | Counts what is left, not what is used |
+| `--pace-tolerance N` | Sets the difference from the pace that is still "on track". Default: `5` |
+| `--format-pace-color` | Gives the pace indicator its own color in the bar |
+| `--tooltip-pace-pts` | Uses point-based pace in the tooltip, and adds a pace mark to each bar |
+| `--frame` | Draws a box around the tooltip |
+| `--frame-font FONT` | Sets the font of the box. Default: `JetBrainsMono Nerd Font Mono` |
+| `--color-low HEX` | Sets the color for 0–49% |
+| `--color-mid HEX` | Sets the color for 50–74% |
+| `--color-high HEX` | Sets the color for 75–89% |
+| `--color-critical HEX` | Sets the color for 90–100% |
+| `--no-color[=WHAT]` | Removes the color. See [Monochrome mode](#monochrome-mode) |
+| `--json` | Prints structured data. See [Structured JSON output](#structured-json-output) |
+| `--refresh` | Ignores the cache and gets new data now |
 
-Use `--icon` to prepend an icon to the widget text. The icon inherits the same color as the usage text.
+### Format placeholders
 
-**Emoji:**
+Use these placeholders in `--format` and `--tooltip-format`. Replace `session` with `weekly` or `review` for the other windows.
 
-```jsonc
-"exec": "codexbar --icon '🤖'"
-// => 🤖 42% · 1h 30m
-```
-
-**Nerd Font glyph:**
-
-```jsonc
-"exec": "codexbar --icon '󰚩'"
-// => 󰚩 42% · 1h 30m
-```
-
-**OpenAI brand icon** (requires [Font Awesome](https://fontawesome.com/) ≥ 7.0.0 OTF):
-
-```jsonc
-"exec": "codexbar --icon \"<span font='Font Awesome 7 Brands'>&#xe7cf;</span>\""
-```
-
-> [!NOTE]
-> On Arch Linux, install the OTF package (`sudo pacman -S otf-font-awesome`). The WOFF2 variant (`woff2-font-awesome`) does not render in Waybar due to a [Pango compatibility issue](https://github.com/Alexays/Waybar/issues/4381).
-
-### Colors
-
-The bar text is colored by severity level out of the box (One Dark palette):
-
-| Class | Range | Default color |
-|---|---|---|
-| `low` | 0–49% | `#98c379` (green) |
-| `mid` | 50–74% | `#e5c07b` (yellow) |
-| `high` | 75–89% | `#d19a66` (orange) |
-| `critical` | 90–100% | `#e06c75` (red) |
-
-To override, pass `--color-*` flags in the `exec` field:
-
-```jsonc
-"custom/codexbar": {
-    "exec": "codexbar --color-low '#50fa7b' --color-critical '#ff5555'",
-    ...
-}
-```
-
-Available flags: `--color-low`, `--color-mid`, `--color-high`, `--color-critical`.
-
-CSS classes (`low`, `mid`, `high`, `critical`) are also emitted for additional styling via `~/.config/waybar/style.css`.
-
-### Theming (Omarchy)
-
-Tooltip and bar text colors are automatically read from the active [Omarchy](https://github.com/basecamp/omarchy) theme at `~/.config/omarchy/current/theme/colors.toml` on every execution. On non-Omarchy systems, the One Dark palette is used as fallback.
-
-The priority chain is: **CLI flags** (`--color-*`) > **Omarchy theme** > **One Dark defaults**.
-
-| Gruvbox | Catppuccin Latte | Everforest |
-|:---:|:---:|:---:|
-| ![Gruvbox](screenshots/gruvbox.png) | ![Catppuccin Latte](screenshots/catppuccin-latte.png) | ![Everforest](screenshots/everforest.png) |
-
-### Format customization
-
-Use `--format` to control the bar text:
+| Placeholder | Shows |
+|---|---|
+| `{plan}` | The plan name, for example `Plus` |
+| `{session_pct}` | The use, in percent |
+| `{session_remaining_pct}` | What is left, in percent |
+| `{session_reset}` | The time until the reset, for example `1h 30m` |
+| `{session_elapsed}` | The elapsed part of the window, in percent |
+| `{session_bar}` | A progress bar |
+| `{session_remaining_bar}` | A progress bar of what is left |
+| `{session_pace}` | The pace icon, from the ratio: `↑` `↓` `→` |
+| `{session_pace_indicator}` | The pace icon, from the points |
+| `{session_pace_pct}` | The pace difference, in percent, for example `72% ahead` |
+| `{session_pace_pts}` | The pace difference, in points, for example `12pts ahead` |
+| `{session_pace_delta}` | The pace difference, with a sign, for example `-12` |
+| `{session_pace_abs_delta}` | The pace difference, without a sign |
+| `{credits_balance}` | The credits balance |
+| `{credits_local}` | The approximate number of local messages that are left |
+| `{credits_cloud}` | The approximate number of cloud messages that are left |
 
 ```bash
-# Default (session usage + countdown)
-codexbar
-# => 42% · 1h 30m
-
-# Session + weekly
-codexbar --format '{session_pct}% · {weekly_pct}%'
-# => 42% · 27%
-
-# With pacing indicator
-codexbar --format '{session_pct}% {session_pace} · {session_reset}'
-# => 42% ↑ · 1h 30m
-
-# Minimal
-codexbar --format '{session_pct}%'
-# => 42%
-
-# Codex-style remaining quota
-codexbar --format '{session_remaining_pct}% · {session_reset}'
-# => 58% · 1h 30m
+codexbar --format '{session_pct}% {session_pace}'      # 42% →   (↑ ↓ or →, from your pace)
+codexbar --format '{session_pct}% · {weekly_pct}%'     # 42% · 27%
+codexbar --remaining                                   # 58% · 1h 30m
 ```
 
-Use `--tooltip-format` for a custom plain-text tooltip (overrides the default rich tooltip):
+## Omarchy shell plugin
+
+The plugin gives you a real user interface instead of a text tooltip. The bar shows the Codex icon and one percentage. A click opens a panel with one meter for each window. Each meter has an animated bar with a mark for the pace, the percentage, the time until the reset, and the credits.
+
+<p align="center">
+  <img src="screenshots/omarchy-bar.png" alt="The widget in the Omarchy bar" width="480">
+</p>
+
+Install the plugin. Then add the plugin to your bar:
 
 ```bash
-codexbar --tooltip-format 'Session: {session_pct}% | Weekly: {weekly_pct}%'
+make install PREFIX=~/.local   # if codexbar is not installed yet
+make install-omarchy
 ```
 
-Example Waybar config with custom format:
+`make install-omarchy` makes a link from the repository to `~/.config/omarchy/plugins/mryll.codexbar`. The manifest is in the root of the repository, and it points to the QML in `omarchy/`.
 
-```jsonc
-"custom/codexbar": {
-    "exec": "codexbar --format '{session_pct}% {session_pace}'",
-    "return-type": "json",
-    "interval": 300,
-    "signal": 12,
-    "tooltip": true,
-    "on-click": "xdg-open https://chatgpt.com/codex/settings/usage"
-}
+Then put the widget in your bar, in `~/.config/omarchy/shell.json`:
+
+```json
+{ "id": "mryll.codexbar" }
 ```
 
-#### Available placeholders
+Mouse actions: **left click** opens the panel, **middle click** gets new data, and **right click** opens the Codex usage page. The footer of the panel ends with a refresh control (󰑐), next to the time of the last update. The control stays disabled while a fetch runs.
 
-| Placeholder | Description | Example |
-|---|---|---|
-| `{plan}` | Plan label | `Plus` |
-| `{session_pct}` | Session (5h) usage % | `42` |
-| `{session_remaining_pct}` | Session (5h) remaining % | `58` |
-| `{session_reset}` | Session countdown | `1h 30m` |
-| `{session_elapsed}` | Session time elapsed % | `58` |
-| `{session_bar}` | Session usage progress bar (Pango) | `████████░░░░░░░░░░░░` |
-| `{session_remaining_bar}` | Session remaining progress bar (Pango) | `███████████░░░░░░░░░` |
-| `{session_pace}` | Session pacing icon (ratio-based) | `↑` / `↓` / `→` |
-| `{session_pace_indicator}` | Session pacing icon (point-based) | `↑` / `↓` / `→` |
-| `{session_pace_pct}` | Session pacing deviation (ratio) | `12% ahead` |
-| `{session_pace_pts}` | Session pacing deviation (points) | `5pts ahead` |
-| `{session_pace_delta}` | Session pacing delta (signed) | `-12` |
-| `{session_pace_abs_delta}` | Session pacing delta (unsigned) | `12` |
-| `{weekly_pct}` | Weekly usage % | `27` |
-| `{weekly_remaining_pct}` | Weekly remaining % | `73` |
-| `{weekly_reset}` | Weekly countdown | `4d 1h` |
-| `{weekly_elapsed}` | Weekly elapsed % | `42` |
-| `{weekly_bar}` | Weekly usage progress bar (Pango) | `█████░░░░░░░░░░░░░░░` |
-| `{weekly_remaining_bar}` | Weekly remaining progress bar (Pango) | `██████████████░░░░░░` |
-| `{weekly_pace}` | Weekly pacing icon (ratio-based) | `↑` / `↓` / `→` |
-| `{weekly_pace_indicator}` | Weekly pacing icon (point-based) | `↑` / `↓` / `→` |
-| `{weekly_pace_pct}` | Weekly pacing deviation (ratio) | `5% under` |
-| `{weekly_pace_pts}` | Weekly pacing deviation (points) | `8pts under` |
-| `{weekly_pace_delta}` | Weekly pacing delta (signed) | `-8` |
-| `{weekly_pace_abs_delta}` | Weekly pacing delta (unsigned) | `8` |
-| `{review_pct}` | Code review usage % | `4` |
-| `{review_remaining_pct}` | Code review remaining % | `96` |
-| `{review_reset}` | Code review countdown | `6d 23h` |
-| `{review_elapsed}` | Code review time elapsed % | `42` |
-| `{review_bar}` | Code review usage progress bar (Pango) | `░░░░░░░░░░░░░░░░░░░░` |
-| `{review_remaining_bar}` | Code review remaining progress bar (Pango) | `███████████████████░` |
-| `{review_pace}` | Code review pacing icon (ratio-based) | `↑` / `↓` / `→` |
-| `{review_pace_indicator}` | Code review pacing icon (point-based) | `↑` / `↓` / `→` |
-| `{review_pace_pct}` | Code review pacing deviation (ratio) | `3% ahead` |
-| `{review_pace_pts}` | Code review pacing deviation (points) | `3pts ahead` |
-| `{review_pace_delta}` | Code review pacing delta (signed) | `3` |
-| `{review_pace_abs_delta}` | Code review pacing delta (unsigned) | `3` |
-| `{credits_balance}` | Credits balance | `0` |
-| `{credits_local}` | Approx local messages | `10–15` |
-| `{credits_cloud}` | Approx cloud messages | `5–8` |
+### Settings
 
-> [!NOTE]
-> Bar placeholders are colored by their own window's usage thresholds (low/mid/high/critical), independently of the surrounding bar text color, which reflects the worst window overall. A `{session_bar}` can render green while the surrounding text is red because weekly or review hit the critical threshold.
+You can change these keys in the settings of the shell.
 
-Additional model-specific Codex limits returned by the backend are shown in the default tooltip and included in severity coloring. The built-in format placeholders continue to target the default Codex session, weekly, code review, and credits meters.
-
-### Pacing indicators
-
-Pacing compares your actual usage against where you "should" be if you spread your quota evenly across the window. It answers: "at this rate, will I run out before the window resets?"
-
-- **↑** — ahead of pace (using faster than sustainable)
-- **→** — on track
-- **↓** — under pace (plenty of room left)
-
-**How it works:** if 30% of the session time has elapsed, you "should" have used ~30% of your quota. The widget divides your actual usage by the expected usage and flags deviations beyond a tolerance band:
-
-| Scenario | Time elapsed | Usage | Pacing | Icon |
-|---|---|---|---|---|
-| Burning through quota | 25% | 60% | 140% ahead | ↑ |
-| Slightly ahead | 50% | 52% | on track (within tolerance) | → |
-| Perfectly even | 50% | 50% | on track | → |
-| Conserving | 70% | 30% | 57% under | ↓ |
-
-By default the tolerance is **±5%** — deviations of 5% or less show as "on track" to avoid noise. You can tune it with `--pace-tolerance`:
-
-```bash
-# More sensitive (±2%) — flags smaller deviations
-codexbar --pace-tolerance 2
-
-# More relaxed (±10%) — only flags large deviations
-codexbar --pace-tolerance 10
-```
-
-The `{session_pace_pct}` / `{weekly_pace_pct}` placeholders show the deviation (e.g. "12% ahead", "5% under", "on track").
-
-#### Point-based pacing
-
-In addition to ratio-based pacing, there's a point-based alternative that computes `actual_usage - expected_usage`. At 22% usage with 78% elapsed, the delta is -56 -- intuitive and stable across the window.
-
-| Placeholder | Type | Example | Description |
+| Key | Type | Default | What it does |
 |---|---|---|---|
-| `{*_pace}` | Ratio | ↑ | Icon with tolerance band (±5% default) |
-| `{*_pace_indicator}` | Points | ↑ | Icon without tolerance (any non-zero = ↑/↓) |
-| `{*_pace_pct}` | Ratio | 12% ahead | Ratio-based deviation label |
-| `{*_pace_pts}` | Points | 5pts ahead | Point-based deviation label |
-| `{*_pace_delta}` | Points | -12 | Signed integer delta |
-| `{*_pace_abs_delta}` | Points | 12 | Unsigned integer delta |
+| `refreshIntervalSec` | integer | `60` | How often the widget asks for new data |
+| `showLabel` | boolean | `true` | Shows the percentage after the icon. A vertical bar always shows only the icon |
+| `barWindow` | enum | `Session` | Which window the bar shows: `Session`, `Weekly`, `Review`, or `Worst` (the fullest one) |
+| `colorMode` | enum | `full` | `full`, `none`, `bar-only` (color on the bar only), or `panel-only` (color in the panel only) |
 
-Replace `*` with `session`, `weekly`, or `review`.
+### The alarm dot
 
-### Per-window pace coloring
+The bar shows one window, but Codex has more than one limit, and each limit can stop your work. If a window that you do not see is at 90% or more, a small dot appears after the percentage. There is no dot, and no message, when all of the other windows are below 90%.
 
-Use `--format-pace-color` to color pace placeholders individually per window based on their point delta, instead of the global usage-based color:
+Put the pointer on the widget to see which limit caused the dot, for example `Weekly: 100%`.
 
-```bash
-codexbar --format-pace-color \
-  --format '{session_pace_indicator}{session_pace_abs_delta}·{weekly_pace_indicator}{weekly_pace_abs_delta}'
-# => ↑4·↓10  (↑4 in orange, ↓10 in green, · in neutral)
-```
+> [!TIP]
+> To make the bar show the fullest window at all times, you can set `barWindow` to `Worst`.
 
-| Delta | Color | Meaning |
+> [!IMPORTANT]
+> After you change a file in `omarchy/`, you must run `omarchy restart shell`. The shell does not read the QML again after `rescanPlugins`, and the shell does not monitor a directory that is a link.
+
+## Theming
+
+codexbar reads the colors from these sources, in sequence, and it stops at the first source that it finds:
+
+1. The `--color-*` flags
+2. The Omarchy theme, at `$XDG_STATE_HOME/omarchy/current/theme/colors.toml` (or `~/.config/omarchy/current/theme/colors.toml`, for an old installation)
+3. The pywal cache, at `$XDG_CACHE_HOME/wal/colors.json`
+4. The One Dark colors that are in the script
+
+The Waybar tooltip follows the same theme:
+
+| Flexoki Light | Rosé Pine | Hackerman |
+|:---:|:---:|:---:|
+| ![Flexoki Light](screenshots/waybar-theme-flexoki-light.png) | ![Rosé Pine](screenshots/waybar-theme-rose-pine.png) | ![Hackerman](screenshots/waybar-theme-hackerman.png) |
+
+| Ristretto | Nord | Kanagawa |
+|:---:|:---:|:---:|
+| ![Ristretto](screenshots/waybar-theme-ristretto.png) | ![Nord](screenshots/waybar-theme-nord.png) | ![Kanagawa](screenshots/waybar-theme-kanagawa.png) |
+
+And so does the Omarchy panel:
+
+<p align="center">
+  <img src="screenshots/omarchy-theme-flexoki-light.png" alt="Flexoki Light" width="200">
+  <img src="screenshots/omarchy-theme-rose-pine.png" alt="Rosé Pine" width="200">
+  <img src="screenshots/omarchy-theme-hackerman.png" alt="Hackerman" width="200">
+  <img src="screenshots/omarchy-theme-ristretto.png" alt="Ristretto" width="200">
+  <img src="screenshots/omarchy-theme-nord.png" alt="Nord" width="200">
+  <img src="screenshots/omarchy-theme-kanagawa.png" alt="Kanagawa" width="200">
+</p>
+
+A theme can give its colors these names (`green`, `yellow`, `orange`, `red`), or it can use the old names (`color1`, `color2`, `color3`). codexbar prefers the names, because the names show a difference between red and orange, and the gauge needs the two colors. codexbar ignores a color that is not valid, and that color keeps its default value.
+
+The pywal step also works with [pywal16](https://github.com/eylles/pywal16) and with the pywal target of [wallust](https://codeberg.org/explosion-mental/wallust), because these tools write the same file. pywal has no orange, so codexbar makes an orange color between the yellow and the red.
+
+> [!NOTE]
+> **If you used codexbar before August 2026, your colors will change.** The widget read the theme from the old path, and it accepted only the `color1` type of name. On a current Omarchy, the widget found no theme, so it used the colors in the script. This version corrects the two problems, so the widget now follows your real theme. If you prefer the old colors, you can set those colors with the `--color-*` flags.
+
+> [!NOTE]
+> The `--color-*` flags now accept a hex color (`#RGB`, `#RRGGBB`) or a one-word color name (`tomato`). codexbar refuses a value that contains a quotation mark, a bracket, or a space. Such a value can break the markup of the bar. codexbar also refuses a name of more than one word, for example `light blue`. You must use the hex value of the color.
+
+## Monochrome mode
+
+`--no-color[=WHAT]` removes the color. `WHAT` is `all` (the default), `bar`, or `tooltip`.
+
+| Command | Bar | Tooltip |
 |---|---|---|
-| ≤ -10 | Green | Well under pace |
-| -10 to 0 | Yellow | Slightly under or on pace |
-| 1 to 9 | Orange | Slightly ahead |
-| ≥ 10 | Red | Burning fast |
+| *(nothing)* | color | color |
+| `--no-color` or `--no-color=all` | plain | plain |
+| `--no-color=bar` | plain | color |
+| `--no-color=tooltip` | color | plain |
 
-Without this flag, the entire bar text is colored by usage percentage -- identical to the default behavior.
+<p align="center">
+  <img src="screenshots/waybar-tooltip-mono.png" alt="The tooltip without color" width="300">
+  <img src="screenshots/omarchy-panel-mono.png" alt="The panel without color" width="316">
+</p>
 
-### Tooltip elapsed markers
+codexbar removes only the color. The icons, the bars, the pace marks, the box, and the bold text stay.
 
-Use `--tooltip-pace-pts` to add an elapsed marker to each tooltip progress bar, showing where even pacing would put you:
+codexbar also obeys [`NO_COLOR`](https://no-color.org): any value that is not empty works like `--no-color=all`. A flag on the command line is more exact than the variable, so the flag has priority. `NO_COLOR=1 codexbar --no-color=bar` still gives you a tooltip with color.
 
+In the Omarchy plugin, the `colorMode` setting does the same.
+
+### Use your own colors
+
+The CSS classes stay in monochrome mode. Remove the colors of codexbar. Then give your bar the colors that you want:
+
+```jsonc
+"exec": "codexbar --no-color"
 ```
-Without --tooltip-pace-pts:
-  Session
-    ░░░░░░░░░░░░░░░░░░░░  27% ↑
-
-With --tooltip-pace-pts:
-  Session
-    ░░░░░░░░░░█░░░░░░░░░  27% ↑
-                  ^ marker at 32% (even pace position)
-```
-
-The marker color adapts to the active theme. Without this flag, the tooltip is unchanged.
-
-### Remaining mode
-
-`--remaining` flips the default framing to "what's left": the bar text shows remaining %, and the
-tooltip renders draining bars (with a remaining-time marker when `--tooltip-pace-pts` is set).
-Severity coloring is unchanged (red when little remains). A custom `--format` / `--tooltip-format`
-always takes precedence.
-
-```bash
-codexbar --remaining
-# bar: "54% · 3h 02m"  (instead of "46% · 3h 02m")
-```
-
-### Framed tooltip
-
-By default the tooltip is **plain** (no border) and renders in your Waybar font, so it looks right with any font. Pass `--frame` to draw the bordered "card" instead:
-
-```bash
-codexbar --frame
-```
-
-Framed mode pins `JetBrainsMono Nerd Font Mono` **by default** so the box, bars and icons stay aligned regardless of your bar font. Don't have it (or prefer another)? Point `--frame-font` at any complete Mono Nerd Font you already have:
-
-```bash
-codexbar --frame --frame-font "FiraCode Nerd Font Mono"
-```
-
-### Spacing
-
-Adjust `padding` (inside the widget) and `margin` (outside the widget) in `~/.config/waybar/style.css`:
 
 ```css
-#custom-codexbar {
-    padding: 0 8px;
-    margin: 0 4px;
-}
+#custom-codexbar.low      { color: #98c379; }
+#custom-codexbar.mid      { color: #e5c07b; }
+#custom-codexbar.high     { color: #d19a66; }
+#custom-codexbar.critical { color: #e06c75; }
 ```
+
+## Structured JSON output
+
+`codexbar --json` prints one JSON object with the data and no markup. Use this output for your own bar, your own script, or a status page. The command always exits with 0, and it always prints valid JSON, also after an error.
+
+```bash
+codexbar --json | jq
+```
+
+| Field | Contains |
+|---|---|
+| `schema_version` | The version of this format. It is `1` |
+| `error` | `null`, or an object with a `message` |
+| `loading` | `true` while there is no data yet |
+| `plan` | The plan name |
+| `state` | The state of the fullest window: `low`, `mid`, `high`, or `critical` |
+| `windows` | One entry for each limit. See below |
+| `credits` | `has_credits`, `unlimited`, `balance`, and the approximate number of messages |
+| `palette` | The colors of the gauge, and the `stops` that give the ramp |
+| `stale` | `true` when the data is not new |
+| `stale_reason` | `network` or `error` |
+| `updated_at` | The time of the data, in ISO 8601 |
+| `data_age_seconds` | The age of the data, in seconds |
+| `last_error` | The last error from the API, with `http_status` and `message` |
+
+Each entry in `windows` has: `id`, `label`, `group` (the model, for a per-model meter), `used_pct`, `remaining_pct`, `reset_at`, `reset_at_unix`, `window_seconds`, `elapsed_pct`, `state`, and a `pace` object.
+
+`palette.stops` is the gauge itself: the colors, and the percentage where each color is. The value is a list of `{pct, color}`, from 0 to 100. The plugin reads the list, and it mixes the colors between the stops. The plugin does not know the limits. If you move a limit in the script, the bar, the tooltip, the `state` field, and the panel change together.
 
 ## How it works
 
-1. Reads OAuth tokens from `~/.codex/auth.json` (created by `codex login`)
-2. Auto-refreshes expired tokens via OpenAI's OAuth endpoint
-3. Fetches usage data from the ChatGPT backend API
-4. Caches responses for 60 seconds
-5. Outputs JSON for Waybar: `{text, tooltip, class}`
+1. codexbar reads your tokens from `~/.codex/auth.json`, which `codex login` writes
+2. codexbar gets a new token when the old token is near its end
+3. codexbar asks the ChatGPT API for your use
+4. codexbar keeps the answer for 60 seconds, in `~/.cache/codexbar/`
+5. codexbar prints Waybar JSON — `{text, tooltip, class}` — or the structured data, with `--json`
+
+More than one instance at the same time is safe. The instances use a lock file and make their requests in sequence. Thus many monitors make one request, and not one request for each monitor.
 
 ## Troubleshooting
 
-| Bar shows | Meaning | Fix |
+| You see | It means | What to do |
 |---|---|---|
-| `↻` | Syncing | Normal at boot — data appears on next refresh |
-| `⚠` | Auth error | Run `codex login` to authenticate |
-| `⚠` | Token expired | Run `codex login` to re-authenticate |
-| `⚠` | API error | Check your internet connection |
-| Nothing | Module not loaded | Check Waybar config and restart Waybar |
+| `⚠` with "No credentials" | There is no login | Run `codex login` |
+| `⚠` with "Token refresh failed" | The token is not valid, or the network is down | Examine your connection. Then run `codex login` |
+| `Loading…` | There is no data yet | Wait for the next request. This is normal after a start |
+| `` after the text | The data is old | codexbar shows the last data that it has. codexbar tries again automatically |
+| No color from your theme | codexbar cannot read the theme file | Examine `$XDG_STATE_HOME/omarchy/current/theme/` for the `colors.toml` file |
+| Nothing in the bar | Waybar did not load the module | Examine your Waybar configuration. Then start Waybar again |
+| The panel does not change after an edit | The shell has the old QML | Run `omarchy restart shell` |
 
 ## Related
 
-- [claudebar](https://github.com/mryll/claudebar) — Claude AI usage widget for Waybar
-- [logibar](https://github.com/mryll/logibar) — Logitech battery widgets for Waybar
-- [meteobar](https://github.com/mryll/meteobar) — Weather widget for Waybar (Open-Meteo)
-- [tickerbar](https://github.com/mryll/tickerbar) — Multi-market price ticker for Waybar (crypto, stocks, forex)
-- [Omarchy](https://github.com/basecamp/omarchy) — Beautiful, modern & opinionated Linux distribution
-- [Waybar](https://github.com/Alexays/Waybar) — Status bar for Wayland compositors
+- [claudebar](https://github.com/mryll/claudebar) — Claude usage
+- [logibar](https://github.com/mryll/logibar) — the battery of Logitech devices
+- [meteobar](https://github.com/mryll/meteobar) — the weather, from Open-Meteo
+- [tickerbar](https://github.com/mryll/tickerbar) — prices of crypto, stocks, and forex
+- [Omarchy](https://github.com/basecamp/omarchy) — the Linux setup for this widget
+- [Waybar](https://github.com/Alexays/Waybar) — the status bar for Wayland

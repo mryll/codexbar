@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "id": "mryll.codexbar",
+  "name": "Codex Usage",
+  "version": "1.0.0",
+  "author": "mryll",
+  "license": "MIT",
+  "description": "OpenAI Codex subscription usage (codexbar) in the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "omarchy/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Codex Usage",
+    "description": "Click: usage panel. Middle click: force refresh. Right click: open the Codex usage page.",
+    "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 60,
+      "showLabel": true,
+      "barWindow": "Session",
+      "colorMode": "full"
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 15,
+        "max": 3600,
+        "step": 15,
+        "defaultValue": 60
+      },
+      {
+        "key": "showLabel",
+        "type": "boolean",
+        "label": "Show usage % next to the icon",
+        "defaultValue": true
+      },
+      {
+        "key": "barWindow",
+        "type": "enum",
+        "label": "Window shown on the bar",
+        "options": [
+          "Session",
+          "Weekly",
+          "Review",
+          "Worst"
+        ],
+        "defaultValue": "Session",
+        "description": "Which usage window drives the bar label. Worst picks the fullest window."
+      },
+      {
+        "key": "colorMode",
+        "type": "enum",
+        "label": "Colors",
+        "options": [
+          "full",
+          "none",
+          "bar-only",
+          "panel-only"
+        ],
+        "defaultValue": "full",
+        "description": "Monochrome rendering. none: no color anywhere. bar-only: colored bar face, plain panel. panel-only: colored panel, plain bar face."
+      }
+    ]
+  }
+}

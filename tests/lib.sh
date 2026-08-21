@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Test harness for codexbar. Runs the real script against a crafted usage
+# payload with NO network. XDG_STATE_HOME/XDG_CACHE_HOME are pinned inside the
+# fake HOME so the caller's real Omarchy theme and pywal cache can never leak
+# into a run and change the colors under the assertions.
 # payload with NO network: fake $HOME, far-future token (no refresh), fresh cache.
 set -uo pipefail
 
@@ -22,7 +25,7 @@ run_codexbar() {
         > "$home/.codex/auth.json" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
     printf '%s' "$usage" > "$home/.cache/codexbar/usage.json" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
     touch "$home/.cache/codexbar/usage.json"                 # fresh -> use cache, no fetch
-    OUT=$(HOME="$home" "$SCRIPT" "$@"); RC=$?
+    OUT=$(HOME="$home" XDG_STATE_HOME="$home/.local/state" XDG_CACHE_HOME="$home/.cache" "$SCRIPT" "$@"); RC=$?
     rm -rf "$home"
     return 0
 }
@@ -39,7 +42,7 @@ run_codexbar_auth() {
     printf '%s' "$auth"  > "$home/.codex/auth.json"          || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
     printf '%s' "$usage" > "$home/.cache/codexbar/usage.json" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
     touch "$home/.cache/codexbar/usage.json"
-    OUT=$(HOME="$home" PATH="$home/bin:$PATH" "$SCRIPT" "$@"); RC=$?
+    OUT=$(HOME="$home" XDG_STATE_HOME="$home/.local/state" XDG_CACHE_HOME="$home/.cache" PATH="$home/bin:$PATH" "$SCRIPT" "$@"); RC=$?
     rm -rf "$home"
     return 0
 }

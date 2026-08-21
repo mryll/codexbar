@@ -78,4 +78,39 @@ run_codexbar '{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent"
 assert_exit0 "1e12 boundary used_percent: exit 0"
 assert_class "1e12 boundary meter counted consistently (render==severity)" critical
 
+# --- API strings are Pango-escaped before rendering ---------------------------
+# plan_type, the credits balance and the per-model meter names all come from the
+# API response and all land inside markup. Unescaped, a stray < or & yields
+# invalid markup and Waybar drops the whole label.
+HOSTILE_STRINGS='{"plan_type":"Plus <b>& Co</b>",
+ "rate_limit":{"primary_window":{"used_percent":5,"reset_at":9999999999,"limit_window_seconds":18000},
+               "secondary_window":{"used_percent":5,"reset_at":9999999999,"limit_window_seconds":604800}},
+ "additional_rate_limits":[{"limit_name":"Model <x> & \"y\"","rate_limit":{"primary_window":{"used_percent":5,"reset_at":9999999999,"limit_window_seconds":18000}}}],
+ "credits":{"has_credits":true,"balance":"<i>1&2</i>","approx_local_messages":[1,2],"approx_cloud_messages":[1,2]}}'
+
+run_codexbar "$HOSTILE_STRINGS"
+assert_exit0      "hostile API strings: exit 0"
+assert_json_valid "hostile API strings: valid JSON"
+_tip=$(jq -r .tooltip <<<"$OUT")
+command grep -qF '<b>& Co</b>' <<<"$_tip" \
+    && _no "plan_type escaped" "raw markup reached the tooltip" || _ok "plan_type escaped"
+command grep -qF '&lt;b&gt;' <<<"$_tip" \
+    && _ok "plan_type entities present" || _no "plan_type entities present" "not escaped as entities"
+command grep -qF '<i>1&2</i>' <<<"$_tip" \
+    && _no "credits balance escaped" "raw markup reached the tooltip" || _ok "credits balance escaped"
+command grep -qF '<x>' <<<"$_tip" \
+    && _no "model meter name escaped" "raw markup reached the tooltip" || _ok "model meter name escaped"
+# Every emitted tag must be one this script opened, never one from the payload.
+_bad=$(command grep -oE '<[a-zA-Z/][^>]*>' <<<"$_tip" | command grep -vE '^</?(span|b|i)( [^>]*)?>$' | head -1 || true)
+[[ -z "$_bad" ]] && _ok "no unexpected tags from payload" || _no "no unexpected tags from payload" "found: $_bad"
+
+# Structured mode carries raw data: jq owns the quoting, no Pango escaping.
+run_codexbar "$HOSTILE_STRINGS" --json
+assert_exit0      "hostile API strings (json): exit 0"
+assert_json_valid "hostile API strings (json): valid JSON"
+_plan=$(jq -r .plan <<<"$OUT")
+[[ "$_plan" == 'Plus <b>& Co</b>' ]] \
+    && _ok "json keeps the plan raw (no HTML entities)" \
+    || _no "json keeps the plan raw (no HTML entities)" "got: $_plan"
+
 finish

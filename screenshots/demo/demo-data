@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# demo-data — stands in for the codexbar CLI with a fully-populated, synthetic
+# payload, so README screenshots show every section at once instead of whatever
+# the author's account happens to look like that day.
+#
+#   PATH="$PWD/screenshots/demo:$PATH" <widget>
+#
+# Both frontends are served from one fixture: the script builds a fake HOME
+# holding a crafted usage cache and then runs the REPO'S OWN codexbar against
+# it, so --json, the waybar document, --no-color/NO_COLOR, --frame and every
+# other flag behave exactly as they do in production. Nothing here re-renders
+# anything by hand.
+#
+# All instants are computed at run time, so countdowns, pacing and "Updated
+# HH:MM" always read sensibly. Contains no account data: the plan is a generic
+# tier label and there are no identifiers of any kind.
+#
+# Variants (CODEXBAR_DEMO):
+#   fresh  (default)  live data, fresh footer
+#   stale             cached data behind an HTTP 503, showing the stale banner
+#                     and the API-error card
+#
+# Not wired into the build, the install target, or the test suite.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+DEMO_DIR="$(dirname "$SELF")"
+REPO_ROOT="$(readlink -f "$DEMO_DIR/../..")"
+REAL="$REPO_ROOT/codexbar"
+[[ -x "$REAL" ]] || { echo "demo-data: real codexbar not found at $REAL" >&2; exit 1; }
+
+VARIANT="${CODEXBAR_DEMO:-fresh}"
+case "$VARIANT" in
+    fresh|stale) ;;
+    *) echo "demo-data: CODEXBAR_DEMO must be 'fresh' or 'stale' (got: $VARIANT)" >&2; exit 1 ;;
+esac
+
+now=$(date +%s)
+
+# Windows are placed across the whole gauge — green, amber, orange, critical —
+# and given reset instants that put each at a different point of its own
+# window, so the pacing indicators differ too:
+#
+#   window            used  elapsed  pace          gauge band
+#   Session (5h)       34%     15%   +19 ahead     green
+#   Weekly             68%     68%    on pace      amber
+#   Code review        82%     95%   -13 under     orange
+#   Spark 5h           94%     60%   +34 ahead     critical
+#   Spark weekly       12%     60%   -48 under     deep green
+#
+# The critical Spark meter is also what makes the bar face's alarm dot appear,
+# since the face itself shows the (green) session window.
+FIVE_H=18000
+WEEK=604800
+
+session_reset=$((  now + FIVE_H * 85 / 100 ))   # 15% elapsed -> 4h 15m left
+weekly_reset=$((   now + WEEK   * 32 / 100 ))   # 68% elapsed -> 2d 5h left
+review_reset=$((   now + WEEK   *  5 / 100 ))   # 95% elapsed -> 8h 24m left
+spark_5h_reset=$(( now + FIVE_H * 40 / 100 ))   # 60% elapsed -> 2h left
+spark_wk_reset=$(( now + WEEK   * 40 / 100 ))   # 60% elapsed -> 2d 19h left
+
+payload=$(jq -nc \
+    --argjson s_reset  "$session_reset" \
+    --argjson w_reset  "$weekly_reset" \
+    --argjson r_reset  "$review_reset" \
+    --argjson k5_reset "$spark_5h_reset" \
+    --argjson kw_reset "$spark_wk_reset" \
+    --argjson five_h   "$FIVE_H" \
+    --argjson week     "$WEEK" \
+    '{
+      plan_type: "plus",
+      rate_limit: {
+        allowed: true, limit_reached: false,
+        primary_window:   { used_percent: 34, reset_at: $s_reset, limit_window_seconds: $five_h },
+        secondary_window: { used_percent: 68, reset_at: $w_reset, limit_window_seconds: $week }
+      },
+      code_review_rate_limit: {
+        primary_window: { used_percent: 82, reset_at: $r_reset, limit_window_seconds: $week }
+      },
+      additional_rate_limits: [
+        { limit_name: "GPT-5.3-Codex-Spark",
+          metered_feature: "codex_spark",
+          rate_limit: {
+            allowed: true, limit_reached: false,
+            primary_window:   { used_percent: 94, reset_at: $k5_reset, limit_window_seconds: $five_h },
+            secondary_window: { used_percent: 12, reset_at: $kw_reset, limit_window_seconds: $week }
+          } }
+      ],
+      credits: {
+        has_credits: true, unlimited: false, balance: "24.50",
+        approx_local_messages: [180, 240],
+        approx_cloud_messages: [60, 80]
+      }
+    }')
+
+# --- Fake HOME so the real script reads the demo payload and never the network.
+demo_home="$(mktemp -d)"
+cleanup() { rm -rf "$demo_home"; }
+trap cleanup EXIT
+
+mkdir -p "$demo_home/.codex" "$demo_home/.cache/codexbar" "$demo_home/bin" "$demo_home/.local/state"
+
+# The active Omarchy theme is linked in (read-only) so the demo renders in
+# whatever theme the screenshot session is using, instead of falling back to
+# the built-in One Dark palette.
+if [[ -d "${HOME:-}/.local/state/omarchy" ]]; then
+    ln -sfn "$HOME/.local/state/omarchy" "$demo_home/.local/state/omarchy"
+fi
+
+b64url() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
+hdr=$(printf '{"alg":"RS256"}' | b64url)
+# Expiry far in the future: the token-refresh path never runs.
+acc=$(printf '{"exp":4102444800}' | b64url)
+idt=$(printf '{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}' | b64url)
+jq -nc --arg at "$hdr.$acc.sig" --arg idt "$hdr.$idt.sig" \
+    '{tokens:{access_token:$at, refresh_token:"demo", account_id:"demo", id_token:$idt}}' \
+    > "$demo_home/.codex/auth.json"
+
+printf '%s' "$payload" > "$demo_home/.cache/codexbar/usage.json"
+
+# curl is stubbed either way, so the fixture can never reach the network — not
+# even if some future code path decides to refetch.
+if [[ "$VARIANT" == "stale" ]]; then
+    # Cache old enough to be refetched; the stub answers 503, which is what
+    # drives the "Stale" banner and the HTTP error card.
+    touch -d "@$(( now - 420 ))" "$demo_home/.cache/codexbar/usage.json"
+    cat > "$demo_home/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n%s' '{"error":{"message":"Upstream temporarily unavailable"}}' '503'
+STUB
+else
+    touch "$demo_home/.cache/codexbar/usage.json"
+    # Same payload, HTTP 200: a refetch, if one ever happened, changes nothing.
+    printf '#!/usr/bin/env bash\nprintf %%s\\\\n%%s %s 200\n' "$(printf '%q' "$payload")" \
+        > "$demo_home/bin/curl"
+fi
+chmod +x "$demo_home/bin/curl"
+
+# Not exec'd: the trap needs to run so the fake HOME is removed.
+set +e
+out=$(HOME="$demo_home" PATH="$demo_home/bin:$PATH" "$REAL" "$@")
+rc=$?
+set -e
+printf '%s\n' "$out"
+exit "$rc"

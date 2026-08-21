@@ -13,7 +13,20 @@ BASE_REF="${BASE_REF:-cc28df1}"   # v0.5.0 — plain tooltip default + --frame/-
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 FIX="$(cat "$(dirname "$0")/fixtures/baseline.json")"
 
-norm() { sed 's/Updated [0-9][0-9]:[0-9][0-9]/Updated XX:XX/g'; }
+# Pango markup is stripped before comparing: the continuous color gradient
+# (colors interpolate over used_pct; usage bars are per-cell ramps) is an
+# intentional output change vs BASE_REF. Plain-text content, layout, padding,
+# and glyph sequences stay guarded. Restore strict byte comparison by bumping
+# BASE_REF once a release commit carries the gradient output.
+norm() { sed 's/Updated [0-9][0-9]:[0-9][0-9]/Updated XX:XX/g; s/<[^>]*>//g'; }
+
+# Working copies without git history (tarballs, sandbox copies) can't fetch
+# the reference script — skip rather than fail on an unrunnable comparison.
+if ! git -C "$REPO" cat-file -e "$BASE_REF:codexbar" 2>/dev/null; then
+    printf '  skip baseline: %s not available (no git history here)\n' "$BASE_REF"
+    finish
+    exit $?
+fi
 
 base_script="$(mktemp)"
 git -C "$REPO" show "$BASE_REF:codexbar" > "$base_script" && chmod +x "$base_script"
@@ -23,8 +36,8 @@ run_codexbar "$FIX" --tooltip-pace-pts;                       new_out="$(norm <<
 rm -f "$base_script"
 
 if [[ "$base_out" == "$new_out" ]]; then
-    _ok "no-flag output unchanged vs $BASE_REF"
+    _ok "no-flag output unchanged vs $BASE_REF (markup-normalized)"
 else
-    _no "no-flag output unchanged vs $BASE_REF" "$(diff <(printf '%s' "$base_out") <(printf '%s' "$new_out") | head -40)"
+    _no "no-flag output unchanged vs $BASE_REF (markup-normalized)" "$(diff <(printf '%s' "$base_out") <(printf '%s' "$new_out") | head -40)"
 fi
 finish

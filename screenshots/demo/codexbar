@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Alias so `PATH="$PWD/screenshots/demo:$PATH" codexbar` intercepts the real binary.
+# A real file, not a symlink: omarchy-plugin-validate rejects symlinks anywhere
+# inside a plugin folder, and this repo root IS the plugin folder.
+exec "$(dirname "$(readlink -f "$0")")/demo-data" "$@"
