@@ -75,6 +75,9 @@ Panel {
   // visible instead of flashing empty.
   property var report: null
   property string errorMessage: ""
+  // The CLI answered `loading:true`: it has nothing yet and is waiting on the
+  // network. Distinct from "no data and no idea why", which is the empty state.
+  property bool loading: false
 
   // Countdowns and "updated" read this instead of Date.now() so the panel
   // keeps telling the truth while it sits open.
@@ -119,20 +122,34 @@ Panel {
     return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
   }
 
-  // Contrast floor for the bar face. The gauge's pale end (or a --color-*
-  // override, or a pywal palette) could land too close to the bar surface to
-  // read, so blend toward the bar's own foreground — preserving hue — only as
-  // far as it takes to clear 4.5:1. Normally a no-op. On a transparent bar the
-  // shell has already swapped barForeground for its wallpaper-safe variant, so
-  // blending toward it is also the right move when the true backdrop is
-  // whatever the wallpaper happens to be.
-  function legibleOnBar(c) {
-    var bg = bar ? bar.background : Color.bar.background
-    var out = c
-    for (var i = 0; i < 12 && contrastRatio(out, bg) < 4.5; i++)
-      out = mix(out, barFaceForeground, 0.2)
-    return out
+  // Generic contrast floor: blend `c` toward `safe` — preserving hue — only as
+  // far as it takes to clear `minRatio` against `backdrop`. Normally a no-op.
+  // Parameterised rather than hardcoded to the bar, because the panel's brand
+  // mark needs the same treatment against a different surface and a different
+  // ratio.
+  function contrastFloor(c, backdrop, safe, minRatio) {
+    if (contrastRatio(c, backdrop) >= minRatio) return c
+    for (var t = 1; t <= 10; t++) {
+      var blended = mix(c, safe, t / 10)
+      if (contrastRatio(blended, backdrop) >= minRatio) return blended
+    }
+    return safe
   }
+
+  // What the bar label is actually drawn against. An opaque bar paints its own
+  // background; a transparent one shows the wallpaper, which we cannot sample —
+  // but the shell already did, and picked a light or dark `barForeground`
+  // accordingly, so we take the extreme that choice implies. Blending toward
+  // `bar.background` on a transparent bar would floor the contrast against a
+  // surface nobody can see.
+  readonly property color barBackdrop: {
+    var fg = bar ? bar.barForeground : Color.foreground
+    if (bar && bar.transparent)
+      return relLuminance(fg) > 0.5 ? Qt.rgba(0, 0, 0, 1) : Qt.rgba(1, 1, 1, 1)
+    return bar ? bar.background : Color.background
+  }
+
+  function legibleOnBar(c) { return contrastFloor(c, barBackdrop, barFaceForeground, 4.5) }
 
   // ------------------------------------------------------------ gauge ramp
   //
@@ -176,7 +193,7 @@ Panel {
   readonly property color gaugeLow:      paletteColor("low",  gaugeColor(0.33))
   readonly property color gaugeMid:      paletteColor("mid",  gaugeColor(0.14))
   readonly property color gaugeHigh:     paletteColor("high", gaugeColor(0.07))
-  readonly property color gaugeCritical: urgent
+  readonly property color gaugeCritical: paletteColor("critical", urgent)
 
   // The payload's own critical anchor, used only to recognise which published
   // stops belong to the critical band so they can be swapped for `urgent`.
@@ -300,13 +317,30 @@ Panel {
     return (d > 0 ? "↑ " : "↓ ") + String(w.pace.points_label || "")
   }
 
-  // Same bands pace_color_for uses in codexbar, mapped onto theme colors.
-  function paceColor(w) {
-    if (!w || !w.pace) return dim
-    var delta = Number(w.pace.delta_points)
-    if (!isFinite(delta) || delta <= 0) return dim
-    if (delta >= 10) return urgent
-    return mix(foreground, urgent, 0.5)
+  // Pacing severity → color. The CLI already owns where the bands turn and
+  // publishes the answer as `pace.state`; re-deriving the thresholds here is
+  // how the two surfaces of one product end up disagreeing. Only burning fast
+  // earns full urgent; slightly ahead gets a nudge; under or on pace stays
+  // quiet. Blended from `dim`, not from `foreground`, so "slightly ahead"
+  // reads as a warmed-up version of the calm tone rather than a washed-out
+  // version of the loud one.
+  function paceColor(state) {
+    // Monochrome keeps the distinction as lightness rather than hue: burning
+    // fast reads at full foreground, everything calmer stays dimmed.
+    if (!panelColored) return state === "hot" ? foreground : dim
+    if (state === "hot") return urgent
+    if (state === "ahead") return mix(dim, urgent, 0.5)
+    return dim
+  }
+
+  // The API sends the balance as a string, so String() renders "24.5" for a
+  // balance the CLI's own tooltip prints as "24.50". Two decimals everywhere:
+  // a money figure that drops a digit reads as a different number.
+  function creditsBalanceText(c) {
+    if (!c) return ""
+    if (c.unlimited === true) return "Unlimited"
+    var n = Number(c.balance)
+    return isFinite(n) ? n.toFixed(2) : String(c.balance || "")
   }
 
   function creditsDetailText(c) {
@@ -335,6 +369,7 @@ Panel {
   // is not fresh. The waybar tooltip builds the same line from the same parts,
   // so a reader sees one footer regardless of which frontend renders it.
   function footerText() {
+    if (!report) return loading ? "󰅐  Waiting for first usage data…" : ""
     var at = updatedTimeText()
     if (at === "" && !root.stale) return ""
     return "󰅐  Updated " + (at !== "" ? at : "—")
@@ -501,6 +536,7 @@ Panel {
 
   function setError(message) {
     root.errorMessage = String(message)              // last-known-good report stays
+    root.loading = false
     // The last good payload stays on screen — deliberate — but it must stop
     // claiming to be current. Without this the footer keeps printing a plain
     // "Updated HH:MM" for data the CLI can no longer refresh.
@@ -516,7 +552,11 @@ Panel {
                + (root.exitCode !== 0 ? " (exit " + root.exitCode + ")" : ""))
       return
     }
-    if (d.loading === true) return                   // still waiting; keep last data
+    if (d.loading === true) {                        // still waiting; keep last data
+      root.loading = true
+      return
+    }
+    root.loading = false
     if (d.error !== null && d.error !== undefined) {
       // A structured error document beats a generic exit-code message.
       setError(String(d.error.message || "Unknown error"))
@@ -602,6 +642,9 @@ Panel {
 
   onOpenedChanged: if (opened) {
     nowMs = Date.now()
+    // A panel that reopens where it was left scrolled shows the middle of
+    // itself; every open starts at the top.
+    if (panelFlick) panelFlick.contentY = 0
     openSweeping = true
     openSweep.restart()
     refresh(false)
@@ -633,7 +676,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(340))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(600))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(620))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -669,7 +712,10 @@ Panel {
           PanelHero {
             width: parent.width
             title: "Codex"
-            meta: root.plan !== "" ? root.plainForAutoText(root.plan) : "OpenAI Codex usage"
+            // A state word, not a restatement of the title right next to it:
+            // PanelHero uppercases meta, so the fallback read "OPENAI CODEX
+            // USAGE" under the word "Codex".
+            meta: root.plan !== "" ? root.plainForAutoText(root.plan) : (root.loading ? "Loading" : "")
             foreground: root.foreground
             fontFamily: root.fontFamily
 
@@ -684,11 +730,17 @@ Panel {
           }
 
           // ---------- Empty / error states ----------
+          // Two different situations, two different surfaces, the same two in
+          // claudebar: "nothing to show yet" is a quiet centred line, while a
+          // hard failure is a bordered card — a thing that went wrong deserves
+          // an edge around it. An error BEHIND stale data is neither: that one
+          // rides under the data it explains, at the bottom of the panel.
           Text {
             visible: root.usageWindows.length === 0 && root.errorMessage === ""
             width: parent.width
             topPadding: Style.space(16)
-            text: "Waiting for usage data…"
+            textFormat: Text.PlainText
+            text: "No usage data yet.\nLog in with the codex CLI and refresh."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -773,12 +825,16 @@ Panel {
               width: parent.width
               implicitHeight: Math.max(creditsLabel.implicitHeight, creditsValue.implicitHeight)
 
+              // Same grammar as claudebar's EXTRA USAGE headline row: a dim
+              // caption on the left saying what the figure is, the figure
+              // itself bold on the right. Same structural row, same reading.
               Text {
                 id: creditsLabel
-                text: "Balance"
-                color: root.foreground
+                text: "Prepaid balance"
+                textFormat: Text.PlainText
+                color: root.dim
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.body
+                font.pixelSize: Style.font.caption
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
               }
@@ -786,9 +842,7 @@ Panel {
               Text {
                 id: creditsValue
                 textFormat: Text.PlainText
-                text: root.credits
-                  ? (root.credits.unlimited === true ? "Unlimited" : String(root.credits.balance))
-                  : ""
+                text: root.creditsBalanceText(root.credits)
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -809,7 +863,15 @@ Panel {
             }
           }
 
-          // ---------- Last API error (when stale) ----------
+          // ---------- Last API error (behind stale data) ----------
+          //
+          // A rule introduces it: without one the line floats against the
+          // CREDITS block above and reads as part of it.
+          PanelSeparator {
+            visible: !!root.lastError
+            foreground: root.foreground
+          }
+
           Text {
             visible: !!root.lastError
             width: parent.width
@@ -818,7 +880,11 @@ Panel {
               ? ("HTTP " + root.lastError.http_status
                  + (String(root.lastError.message || "") !== "" ? " — " + root.lastError.message : ""))
               : ""
-            color: root.panelColored ? root.urgent : root.foreground
+            // 5xx is the server failing; 4xx is usually something the user can
+            // act on. Full urgent is reserved for the former.
+            color: root.lastError && Number(root.lastError.http_status) >= 500
+              ? (root.panelColored ? root.urgent : root.foreground)
+              : (root.panelColored ? root.mix(root.dim, root.urgent, 0.5) : root.dim)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
@@ -1082,7 +1148,7 @@ Panel {
         id: paceLabel
         textFormat: Text.PlainText
         text: root.paceText(windowRow.win)
-        color: root.panelColored ? root.paceColor(windowRow.win) : root.dim
+        color: root.paceColor(windowRow.win && windowRow.win.pace ? String(windowRow.win.pace.state) : "")
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         anchors.right: parent.right

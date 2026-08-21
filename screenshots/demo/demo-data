@@ -15,10 +15,10 @@
 # HH:MM" always read sensibly. Contains no account data: the plan is a generic
 # tier label and there are no identifiers of any kind.
 #
-# Variants (CODEXBAR_DEMO):
-#   fresh  (default)  live data, fresh footer
-#   stale             cached data behind an HTTP 503, showing the stale banner
-#                     and the API-error card
+# Optional switches (default: a healthy, fresh document). Same names and same
+# meanings as claudebar's fixture, so one screenshot script drives both:
+#   CODEXBAR_DEMO_ERROR=503             show the API-error card (code[:message])
+#   CODEXBAR_DEMO_STALE=1               show the stale/⏸ footer instead of "Updated"
 #
 # Not wired into the build, the install target, or the test suite.
 set -euo pipefail
@@ -27,13 +27,15 @@ SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 DEMO_DIR="$(dirname "$SELF")"
 REPO_ROOT="$(readlink -f "$DEMO_DIR/../..")"
 REAL="$REPO_ROOT/codexbar"
-[[ -x "$REAL" ]] || { echo "demo-data: real codexbar not found at $REAL" >&2; exit 1; }
+# A widget must never break the bar, not even a demo one: answer in the shape
+# waybar expects and exit 0, exactly as the real script does on every failure.
+if [[ ! -x "$REAL" ]]; then
+    printf '{"text":"demo-data: cannot find ../../codexbar","tooltip":"Run it from inside the repo.","class":"critical"}\n'
+    exit 0
+fi
 
-VARIANT="${CODEXBAR_DEMO:-fresh}"
-case "$VARIANT" in
-    fresh|stale) ;;
-    *) echo "demo-data: CODEXBAR_DEMO must be 'fresh' or 'stale' (got: $VARIANT)" >&2; exit 1 ;;
-esac
+DEMO_ERROR="${CODEXBAR_DEMO_ERROR:-}"
+DEMO_STALE="${CODEXBAR_DEMO_STALE:-}"
 
 now=$(date +%s)
 
@@ -120,19 +122,46 @@ printf '%s' "$payload" > "$demo_home/.cache/codexbar/usage.json"
 
 # curl is stubbed either way, so the fixture can never reach the network — not
 # even if some future code path decides to refetch.
-if [[ "$VARIANT" == "stale" ]]; then
-    # Cache old enough to be refetched; the stub answers 503, which is what
-    # drives the "Stale" banner and the HTTP error card.
-    touch -d "@$(( now - 420 ))" "$demo_home/.cache/codexbar/usage.json"
-    cat > "$demo_home/bin/curl" <<'STUB'
+# The script reads curl's answer as "body, newline, HTTP status", so the stub
+# has to reproduce exactly that shape. Written through a heredoc rather than a
+# nested printf format: the escaping needed to emit a printf that emits a
+# newline is three levels deep and gets silently wrong (one missing backslash
+# turns the separator into a literal "n", the status stops matching ^[0-9]{3}$,
+# and the widget reports "waiting for network" instead of the error under test).
+write_curl_stub() {  # <body-json> <http-status>
+    cat > "$demo_home/bin/curl" <<STUB
 #!/usr/bin/env bash
-printf '%s\n%s' '{"error":{"message":"Upstream temporarily unavailable"}}' '503'
+printf '%s\n' $(printf '%q' "$1")
+printf '%s'   $(printf '%q' "$2")
 STUB
+}
+
+if [[ -n "$DEMO_ERROR" || -n "$DEMO_STALE" ]]; then
+    # Cache old enough that the script refetches AND takes its boot-like path
+    # (over NET_BOOT_CACHE_AGE), where a recent .net_wait means a sibling has
+    # already established the network is down. The stub then answers with the
+    # requested status, which is what drives the "Stale" banner and — when the
+    # status is an error — the HTTP card underneath it.
+    demo_code="${DEMO_ERROR%%:*}"; demo_code="${demo_code:-503}"
+    demo_msg="${DEMO_ERROR#*:}"
+    [[ "$demo_msg" == "$DEMO_ERROR" || -z "$demo_msg" ]] && demo_msg="Upstream temporarily unavailable"
+    touch -d "@$(( now - 900 ))" "$demo_home/.cache/codexbar/usage.json"
+    if [[ -n "$DEMO_ERROR" ]]; then
+        write_curl_stub "$(jq -nc --arg m "$demo_msg" '{error:{message:$m}}')" "$demo_code"
+    else
+        # Stale WITHOUT an error: the network is simply unreachable, which is the
+        # other way a widget ends up serving cached data.
+        printf '#!/usr/bin/env bash\nexit 1\n' > "$demo_home/bin/curl"
+        # A sibling instance already found the network down in this episode, so
+        # this run takes the single-attempt path instead of burning the whole
+        # retry budget. A real state, not a shortcut — and it keeps the demo as
+        # fast as the healthy variant.
+        touch "$demo_home/.cache/codexbar/.net_wait"
+    fi
 else
     touch "$demo_home/.cache/codexbar/usage.json"
     # Same payload, HTTP 200: a refetch, if one ever happened, changes nothing.
-    printf '#!/usr/bin/env bash\nprintf %%s\\\\n%%s %s 200\n' "$(printf '%q' "$payload")" \
-        > "$demo_home/bin/curl"
+    write_curl_stub "$payload" 200
 fi
 chmod +x "$demo_home/bin/curl"
 

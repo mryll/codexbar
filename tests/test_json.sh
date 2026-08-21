@@ -22,7 +22,7 @@ PROLITE=$(cat "$(dirname "$0")/fixtures/usage-prolite-spark.json")
 run_codexbar "$BASE" --json
 assert_exit0      "json: exit 0"
 assert_json_valid "json: valid JSON"
-assert_jq "json: schema_version 1"        '.schema_version'  "1"
+assert_jq "json: schema_version 2"        '.schema_version'  "2"
 assert_jq "json: error null"              '.error'           "null"
 assert_jq "json: loading false"           '.loading'         "false"
 assert_jq "json: plan label"              '.plan'            "Plus"
@@ -35,7 +35,11 @@ assert_jq "json: session state low"       '.windows[0].state'          "low"
 assert_jq "json: used_pct is number"      '.windows[0].used_pct | type' "number"
 assert_jq "json: reset_at ISO-8601"       '.windows[0].reset_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")' "true"
 assert_jq "json: session pace has delta"  '.windows[0].pace.delta_points | type' "number"
-assert_jq "json: session pace state"      '.windows[0].pace.state'     "ahead"
+# Four bands now, the same ones claudebar publishes: a delta of +10 or more
+# is "hot", not merely "ahead".
+assert_jq "json: session pace state"      '.windows[0].pace.state'     "hot"
+assert_jq "json: session pace indicator"  '.windows[0].pace.indicator' "↑"
+assert_jq "json: max_pct present"         '.max_pct | type'            "number"
 assert_jq "json: weekly id + pct"         '.windows[1] | "\(.id) \(.used_pct)"' "weekly 47"
 assert_jq "json: review id + pct"         '.windows[2] | "\(.id) \(.used_pct) \(.label)"' "review 4 Code review"
 assert_jq "json: elapsed_pct present"     '.windows[0].elapsed_pct | type' "number"
@@ -328,7 +332,7 @@ assert_exit0      "json error: exit 0"
 assert_json_valid "json error: valid JSON"
 assert_jq "json error: object shape"     '.error | type'     "object"
 assert_jq "json error: message present"  '.error.message | length > 0' "true"
-assert_jq "json error: schema_version 1" '.schema_version'   "1"
+assert_jq "json error: schema_version 2" '.schema_version'   "2"
 assert_jq "json error: windows empty"    '.windows | length' "0"
 
 # --- Arg errors answer in the structured shape when --json is anywhere ---
@@ -336,7 +340,7 @@ run_codexbar "$BASE" --json --icon
 assert_exit0      "json arg error: exit 0"
 assert_json_valid "json arg error: valid JSON"
 assert_jq "json arg error: message"      '.error.message'  "--icon requires a value"
-assert_jq "json arg error: schema"       '.schema_version' "1"
+assert_jq "json arg error: schema"       '.schema_version' "2"
 run_codexbar "$BASE" --badopt --json
 assert_json_valid "json arg error: --json after bad flag still structured"
 assert_jq "json arg error: unknown option message" '.error.message' "Unknown option: --badopt"

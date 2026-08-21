@@ -147,9 +147,9 @@ cli_error() {
     if [[ "$JSON_MODE" == "true" ]]; then
         if command -v jq &>/dev/null; then
             jq -nc --arg m "$1" \
-                '{schema_version:1, error:{message:$m}, loading:false, windows:[], credits:null}'
+                '{schema_version:2, error:{message:$m}, loading:false, windows:[], credits:null}'
         else
-            echo '{"schema_version":1,"error":{"message":"invalid arguments"},"loading":false,"windows":[],"credits":null}'
+            echo '{"schema_version":2,"error":{"message":"invalid arguments"},"loading":false,"windows":[],"credits":null}'
         fi
     else
         local _m="${1//\\/\\\\}"; _m="${_m//\"/\\\"}"
@@ -459,10 +459,10 @@ die() {
         _msg="${_msg//\\n/ }"; _msg="${_msg//$'\n'/ }"
         if command -v jq &>/dev/null; then
             jq -nc --arg m "$_msg" \
-                '{schema_version:1, error:{message:$m}, loading:false, windows:[], credits:null}'
+                '{schema_version:2, error:{message:$m}, loading:false, windows:[], credits:null}'
         else
             _msg="${_msg//\\/\\\\}"; _msg="${_msg//\"/\\\"}"
-            printf '{"schema_version":1,"error":{"message":"%s"},"loading":false,"windows":[],"credits":null}\n' "$_msg"
+            printf '{"schema_version":2,"error":{"message":"%s"},"loading":false,"windows":[],"credits":null}\n' "$_msg"
         fi
         exit 0
     fi
@@ -484,7 +484,7 @@ die() {
 loading_network() {
     if [[ "$JSON_MODE" == "true" ]]; then
         # Structured "still waiting" shape — the consumer keeps its last data.
-        jq -nc '{schema_version:1, error:null, loading:true, windows:[], credits:null}'
+        jq -nc '{schema_version:2, error:null, loading:true, windows:[], credits:null}'
         exit 0
     fi
     jq -nc \
@@ -677,18 +677,29 @@ display_bar() {
     fi
 }
 
-# Color based on signed pacing delta, centered around zero:
-#   <= -10  green   (well under pace, plenty of room)
-#   -10..0  yellow  (slightly under or exactly on pace)
-#   1..+9   orange  (slightly ahead, watch it)
-#   >= +10  red     (burning fast)
-pace_color_for() {
+# Pacing severity based on signed pacing delta, centered around zero:
+#   <= -11  under   (well under pace, plenty of room)     → green
+#   -10..0  on_pace (slightly under or exactly on pace)   → yellow
+#   1..+9   ahead   (slightly ahead, watch it)            → orange
+#   >= +10  hot     (burning fast)                        → red
+# Same single-source rule as severity_for: --format-pace-color and the
+# --json per-window pace "state" field both derive from this.
+pace_severity_for() {
     local delta=${1:-0}
-    if   (( delta >= 10 ));  then printf '%s' "$RED"
-    elif (( delta > 0 ));    then printf '%s' "$ORANGE"
-    elif (( delta >= -10 )); then printf '%s' "$YELLOW"
-    else printf '%s' "$GREEN"
+    if   (( delta >= 10 ));  then printf 'hot'
+    elif (( delta > 0 ));    then printf 'ahead'
+    elif (( delta >= -10 )); then printf 'on_pace'
+    else printf 'under'
     fi
+}
+
+pace_color_for() {
+    case "$(pace_severity_for "${1:-0}")" in
+        hot)     printf '%s' "$RED"     ;;
+        ahead)   printf '%s' "$ORANGE"  ;;
+        on_pace) printf '%s' "$YELLOW"  ;;
+        *)       printf '%s' "$GREEN"   ;;
+    esac
 }
 
 # Render <count> filled bar cells starting at 0-based cell <start>.
@@ -1242,20 +1253,18 @@ iso8601() {
 # pace_line is raw calc_pacing output. Emits one compact JSON object.
 json_window() {
     local id=$1 label=$2 group=$3 used=$4 reset_at=$5 window_s=$6 pace_line=$7
-    local elapsed _icon indicator delta _rest
-    read -r elapsed _icon indicator delta _rest <<< "$pace_line"
+    local elapsed icon indicator delta _rest
+    read -r elapsed icon indicator delta _rest <<< "$pace_line"
     local pct_label pts_label
     pct_label=$(cut -d' ' -f5-6 <<< "$pace_line")
     pts_label=$(cut -d' ' -f7-8 <<< "$pace_line")
-    local pace_state="on_track"
-    [[ "$indicator" == "↑" ]] && pace_state="ahead"
-    [[ "$indicator" == "↓" ]] && pace_state="under"
     jq -nc \
         --arg id "$id" --arg label "$label" --arg group "$group" \
         --argjson used "$used" --argjson remaining "$(remaining_pct_for "$used")" \
         --arg reset "$(iso8601 "$reset_at")" --argjson reset_unix "${reset_at:-0}" \
         --argjson window_s "$window_s" --argjson elapsed "$elapsed" \
-        --argjson delta "$delta" --arg pace_state "$pace_state" \
+        --argjson delta "$delta" --arg pace_state "$(pace_severity_for "${delta:-0}")" \
+        --arg icon "$icon" --arg indicator "$indicator" \
         --arg ratio_label "$pct_label" --arg points_label "$pts_label" \
         --arg severity "$(severity_for "$used")" \
         '{id:$id, label:$label,
@@ -1265,6 +1274,7 @@ json_window() {
           reset_at_unix:(if $reset_unix == 0 then null else $reset_unix end),
           window_seconds:$window_s, elapsed_pct:$elapsed,
           pace:{delta_points:$delta, state:$pace_state,
+                icon:$icon, indicator:$indicator,
                 ratio_label:$ratio_label, points_label:$points_label},
           state:$severity}'
 }
@@ -1367,14 +1377,14 @@ if [[ "$JSON_MODE" == "true" ]]; then
                  {pct:100, color:$critical}]}')
 
     jq -nc \
-        --arg plan "$plan" --arg state "$class" \
+        --arg plan "$plan" --arg state "$class" --argjson max_pct "$max_pct" \
         --argjson windows "$windows_json" --argjson credits "$credits_json" \
         --argjson palette "$palette_json" \
         --argjson stale "$_stale" --arg stale_reason "$_stale_reason" \
         --arg updated "$_updated_iso" --argjson age "$_age_s" \
         --argjson last_error "$_last_error_json" \
-        '{schema_version:1, error:null, loading:false,
-          plan:$plan, state:$state,
+        '{schema_version:2, error:null, loading:false,
+          plan:$plan, state:$state, max_pct:$max_pct,
           windows:$windows, credits:$credits, palette:$palette,
           stale:$stale,
           stale_reason:(if $stale_reason == "" then null else $stale_reason end),
