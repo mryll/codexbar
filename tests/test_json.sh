@@ -349,9 +349,10 @@ assert_exit0      "json ctrl-char: exit 0"
 assert_json_valid "json ctrl-char: valid JSON"
 assert_jq "json ctrl-char: tab round-trips" '.error.message | test("bad\\topt")' "true"
 
-# --- jq-less fallback: FIXED literal, still valid JSON, exit 0 ---
-# PATH holds only a curl stub: the dependency pre-check passes curl, then
-# fails on jq and must answer with the fixed literal (no interpolation).
+# --- jq-less fallback: hand-escaped message, still valid JSON, exit 0 ---
+# PATH holds only a curl stub: the dependency pre-check passes curl, then fails
+# on jq. Without jq the message is escaped by hand rather than dropped, so the
+# user still learns what actually failed.
 _nojq_home=$(mktemp -d) || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
 mkdir -p "$_nojq_home/bin"
 printf '#!/bin/sh\nexit 1\n' > "$_nojq_home/bin/curl" && chmod +x "$_nojq_home/bin/curl"
@@ -359,7 +360,7 @@ _bash=$(command -v bash)
 OUT=$(HOME="$_nojq_home" XDG_STATE_HOME="$_nojq_home/.local/state" XDG_CACHE_HOME="$_nojq_home/.cache" PATH="$_nojq_home/bin" "$_bash" "$(dirname "$0")/../codexbar" --json); RC=$?
 assert_exit0      "json no-jq: exit 0"
 assert_json_valid "json no-jq: valid JSON"
-assert_jq "json no-jq: fixed literal message" '.error.message' "missing dependency"
+assert_jq "json no-jq: names the missing dependency" '.error.message | test("jq")' "true"
 # Arg error without jq: fixed "invalid arguments" literal.
 OUT=$(HOME="$_nojq_home" XDG_STATE_HOME="$_nojq_home/.local/state" XDG_CACHE_HOME="$_nojq_home/.cache" PATH="$_nojq_home/bin" "$_bash" "$(dirname "$0")/../codexbar" --json --icon); RC=$?
 assert_exit0      "json no-jq arg error: exit 0"

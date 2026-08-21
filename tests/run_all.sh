@@ -8,7 +8,11 @@ for t in test_*.sh; do
 done
 echo "== lint =="
 bash -n ../codexbar || rc=1
-n=$(shellcheck -S style ../codexbar | grep -cE 'SC[0-9]+ \(')
-echo "shellcheck warnings: $n (baseline 4)"
-[[ "$n" -le 4 ]] || rc=1
+if command -v shellcheck >/dev/null 2>&1; then
+  n=$(shellcheck -S style ../codexbar | grep -cE 'SC[0-9]+ \(')
+  echo "shellcheck warnings: $n (baseline 4)"
+  [[ "$n" -le 4 ]] || rc=1
+else
+  echo "shellcheck not installed — skipped"
+fi
 exit $rc

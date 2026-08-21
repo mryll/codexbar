@@ -3,11 +3,38 @@
 # Reads OAuth credentials from Codex CLI, shows session/weekly/review limits
 # with colored progress bars and Pango markup tooltip.
 #
-# Usage: codexbar [--icon ICON] [--format FORMAT] [--tooltip-format FORMAT] [--pace-tolerance N]
-#                  [--format-pace-color] [--tooltip-pace-pts] [--remaining] [--json] [--refresh]
-#                  [--color-low HEX] [--color-mid HEX] [--color-high HEX] [--color-critical HEX]
+# Usage: codexbar [--help] [--icon ICON] [--format FORMAT] [--tooltip-format FORMAT]
+#                 [--pace-tolerance N] [--format-pace-color] [--tooltip-pace-pts] [--remaining]
+#                 [--frame] [--frame-font FONT] [--no-color[=all|bar|tooltip]]
+#                 [--color-low HEX] [--color-mid HEX] [--color-high HEX] [--color-critical HEX]
+#                 [--json] [--refresh]
+#
+# --help     Print this reference — usage, flags and format placeholders — and
+#            exit 0. Also accepted as -h.
+# --json     Structured output mode: emits one raw-data JSON object (numbers,
+#            ISO-8601 timestamps, state strings — no Pango markup) instead of
+#            Waybar JSON. For frontends that render their own UI, e.g. the
+#            Omarchy shell plugin in omarchy/. Always exits 0; errors are
+#            reported in an "error" field. Carries the resolved gauge anchors
+#            in "palette" (theme colors / --color-* overrides) so such a
+#            frontend paints the same ramp this script does — the only colors
+#            in the payload, and data rather than markup.
+#            See README "Structured JSON output".
+# --refresh  Bypass the 60s response cache and fetch fresh data from the API
+#            (the result still updates the cache for other instances).
+# --frame    Draw the tooltip as a bordered card instead of plain text. The box
+#            is built from Nerd Font glyphs; --frame-font FONT names the font
+#            Pango uses for them when the Waybar font has no box drawing.
+# --no-color[=all|bar|tooltip]
+#            Monochrome output: no color markup on the chosen surface (default
+#            "all"). Everything structural stays — glyphs, bar characters,
+#            markers, box drawing, bold, layout. The "class" field and the
+#            --json payload are unaffected, so CSS remains the way to style a
+#            monochrome bar. NO_COLOR=<non-empty> in the environment means
+#            --no-color=all; an explicit flag wins over it.
 #
 # Format placeholders:
+#   {icon}              Widget mark, Nerd Font (󱙺)
 #   {plan}              Plan label (e.g. "Plus")
 #   {session_pct}            Session (5h) usage %
 #   {session_remaining_pct}  Session (5h) remaining %
@@ -56,12 +83,9 @@
 #       window so both placeholder families report the real weekly usage.
 # Note: bar placeholders are colored by their own window's usage, independent of
 #       the surrounding bar text color (which reflects the worst window).
-# Note: --remaining            Show "what's left": default bar + tooltip flip to remaining
-#                              (drain bars + remaining-time marker). User --format/--tooltip-format win.
-# Note: --json                 Structured JSON output for frontends (e.g. the Omarchy shell
-#                              plugin in omarchy/): raw numbers, ISO-8601 timestamps and state
-#                              strings — no Pango, no bars, no colors. See README.
-# Note: --refresh              Bypass the read cache (TTL 0) and fetch fresh data now.
+# --remaining flips the default bar text + tooltip to a "what's left" framing
+#   (e.g. "58% · 1h 30m"); {*_remaining_pct} and {*_remaining_bar} are
+#   available regardless of this flag. Fully backward compatible; opt-in.
 
 set -euo pipefail
 
@@ -134,8 +158,21 @@ cli_error() {
     exit 0
 }
 
+# --help / -h: the reference the user needs is already the header comment of
+# this file, so print that rather than a second copy that can drift from it.
+# The block runs from the "# Usage:" line to the first line that is not a
+# comment, with the leading "# " stripped. Plain text on stdout, exit 0 —
+# --json does not apply: a human asked.
+show_help() {
+    awk '/^# Usage:/ { p = 1 }
+         p && !/^#/  { exit }
+         p           { sub(/^#( |$)/, ""); print }' "${BASH_SOURCE[0]}"
+    exit 0
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --help|-h) show_help ;;
         --icon)
             [[ $# -ge 2 ]] || cli_error "--icon requires a value"
             BAR_ICON="$2"; shift 2 ;;
@@ -415,14 +452,17 @@ die() {
     if [[ "$JSON_MODE" == "true" ]]; then
         # Structured error shape: same exit-0 philosophy, no markup. Callers
         # pass waybar-tooltip strings, so strip <b> tags and flatten the
-        # literal "\n" line breaks they carry. Without jq there is no safe
-        # string encoder, so that fallback is a FIXED literal.
-        local _msg="${1//<b>/}"; _msg="${_msg//<\/b>/}"; _msg="${_msg//\\n/ }"
+        # literal "\n" line breaks they carry. The no-jq fallback escapes the
+        # message by hand rather than dropping it: a user without jq still gets
+        # told what actually failed.
+        local _msg="${1//<b>/}"; _msg="${_msg//<\/b>/}"
+        _msg="${_msg//\\n/ }"; _msg="${_msg//$'\n'/ }"
         if command -v jq &>/dev/null; then
             jq -nc --arg m "$_msg" \
                 '{schema_version:1, error:{message:$m}, loading:false, windows:[], credits:null}'
         else
-            echo '{"schema_version":1,"error":{"message":"missing dependency"},"loading":false,"windows":[],"credits":null}'
+            _msg="${_msg//\\/\\\\}"; _msg="${_msg//\"/\\\"}"
+            printf '{"schema_version":1,"error":{"message":"%s"},"loading":false,"windows":[],"credits":null}\n' "$_msg"
         fi
         exit 0
     fi
@@ -449,7 +489,7 @@ loading_network() {
     fi
     jq -nc \
         --arg t "${BAR_ICON:+${BAR_ICON} }Loading…" \
-        --arg tip "Waiting for network — no cached usage yet.\nWill retry shortly." \
+        --arg tip $'Waiting for network — no cached usage yet.\nWill retry shortly.' \
         '{text:$t, tooltip:$tip, class:"low"}'
     exit 0
 }
@@ -512,17 +552,37 @@ pango_escape() {
     sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<< "${1:-}"
 }
 
-# Monochrome a rendered surface: drop every Pango color attribute while keeping
-# all structure — glyphs, bar fill characters, markers, box drawing, font_weight
-# and font_family. A <span> left with no attributes is inert, so the layout is
-# byte-for-byte the same width.
+# Strip color from Pango markup while keeping everything structural: only the
+# painting attributes go, so <span font_weight='bold'> stays bold, glyphs, bar
+# fill characters, markers and box drawing are untouched, and an attribute-less
+# <span> renders exactly like plain text.
 #
-# This has to cover markup the USER authored through --format/--tooltip-format
-# too, not just what this script emits: hence every Pango color attribute
-# (foreground/fgcolor/color, background/bgcolor, and the three line colors),
-# in both quoting styles.
-strip_color_markup() {
-    sed -E "s/[[:space:]]+(foreground|fgcolor|color|background|bgcolor|underline_color|strikethrough_color|overline_color)=(\"[^\"]*\"|'[^']*')//g"
+# Tag-aware on purpose. The bar and tooltip may carry the user's own --format
+# markup, so this has to cover attributes we never emit (double-quoted values,
+# background=, the underline/overline/strikethrough colors) — while leaving
+# body text that merely looks like an attribute alone. Names are matched in
+# lowercase because that is the only spelling Pango itself honors.
+decolor() {
+    awk '''
+    BEGIN {
+        q = sprintf("%c", 39)   # single quote, built here to dodge shell quoting
+        names = "foreground|fgcolor|color|background|bgcolor|underline_color|overline_color|strikethrough_color"
+        re = "[ \t]+(" names ")[ \t]*=[ \t]*(\"[^\"]*\"|" q "[^" q "]*" q "|[^ \t>]+)"
+    }
+    {
+        out = ""; rest = $0
+        while ((i = index(rest, "<")) > 0) {
+            out = out substr(rest, 1, i - 1)
+            after = substr(rest, i + 1)
+            j = index(after, ">")
+            if (j == 0) { out = out substr(rest, i); rest = ""; break }
+            tag = substr(after, 1, j - 1)
+            rest = substr(after, j + 1)
+            gsub(re, "", tag)
+            out = out "<" tag ">"
+        }
+        print out rest
+    }'''
 }
 
 format_plan_label() {
@@ -1355,7 +1415,7 @@ format_review_remaining_bar=$(make_bar "$review_remaining_pct" "$review_color")
 
 apply_format() {
     local text="$1"
-    text="${text//\{icon\}/}"
+    text="${text//\{icon\}/󱙺}"
     text="${text//\{plan\}/$plan}"
     text="${text//\{session_pct\}/$session_pct}"
     text="${text//\{session_remaining_pct\}/$session_remaining_pct}"
@@ -1416,7 +1476,7 @@ if [[ "$COLOR_BAR" != "true" ]]; then
     # Monochrome bar: no wrapper span, and any color a --format placeholder
     # injected (bars, pace) is stripped. Glyphs and layout are untouched.
     bar_text="${BAR_ICON:+${BAR_ICON} }${bar_text}"
-    bar_text=$(strip_color_markup <<< "$bar_text")
+    bar_text=$(printf '%s' "$bar_text" | decolor)
 elif [[ "$FORMAT_PACE_COLOR" == "true" && "$FORMAT" == *_pace* ]]; then
     # Neutral base; pace placeholders provide their own color
     bar_text="<span foreground='${FG}'>${BAR_ICON:+${BAR_ICON} }${bar_text}</span>"
@@ -1703,7 +1763,7 @@ fi
 
 # Monochrome tooltip: same structure (glyphs, bars, markers, box drawing,
 # alignment, font attributes), just no color attributes.
-[[ "$COLOR_TOOLTIP" == "true" ]] || t=$(strip_color_markup <<< "$t")
+[[ "$COLOR_TOOLTIP" == "true" ]] || t=$(printf '%s' "$t" | decolor)
 
 # --- Output waybar JSON ---
 jq -nc --arg text "$bar_text" --arg tooltip "$t" --arg class "$class" \
