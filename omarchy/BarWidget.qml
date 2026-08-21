@@ -21,7 +21,14 @@ BarWidget {
     if ("hostWidget" in target) target.hostWidget = root
   }
 
+  // Two names because they mean different things: refresh() honours the read
+  // cache (the safe thing to expose to a future shell hook), refreshForce()
+  // bypasses it. Middle click is a deliberate user gesture, so it forces.
   function refresh() {
+    if (panelItem && panelItem.refresh) panelItem.refresh(false)
+  }
+
+  function refreshForce() {
     if (panelItem && panelItem.refresh) panelItem.refresh(true)
   }
 
@@ -50,13 +57,9 @@ BarWidget {
   }
 
   // Icon-only on vertical bars and when the label is disabled; the panel is
-  // always one click away either way.
-  readonly property string barLabel: {
-    if (!panelItem) return ""
-    var label = String(panelItem.barLabel || "")
-    if (root.vertical || setting("showLabel", true) !== true) return ""
-    return label
-  }
+  // always one click away either way. Both gates are applied in Panel.qml,
+  // which owns the settings.
+  readonly property string barLabel: panelItem ? panelItem.barLabel : ""
   readonly property string plainText: brandIcon + (barLabel !== "" ? " " + barLabel : "")
 
   // How wide the bar's open-panel underline should be. Without this hint the bar
@@ -108,7 +111,7 @@ BarWidget {
     tooltipText: root.panelItem ? root.panelItem.barTooltip : ""
 
     onPressed: function(b) {
-      if (b === Qt.MiddleButton) root.refresh()
+      if (b === Qt.MiddleButton) root.refreshForce()
       else if (b === Qt.RightButton) {
         if (root.bar) root.bar.run("xdg-open https://chatgpt.com/codex/settings/usage")
       } else root.togglePanel()

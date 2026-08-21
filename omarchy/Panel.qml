@@ -38,8 +38,8 @@ Panel {
   // ALWAYS dim ("when is this from" is information, not a warning); only the
   // "· stale (…)" suffix carries a muted warning tone, never full urgent. Text
   // stays the primary carrier, so a monochrome panel loses nothing.
-  readonly property color freshnessWarn: !colorPanel ? dim : mix(dim, urgent, 0.4)
-  readonly property color track: Style.selectedFillFor(foreground, Color.accent)
+  readonly property color freshnessWarn: !panelColored ? dim : mix(dim, urgent, 0.4)
+  readonly property color track: Style.selectedFillFor(foreground, Color.accent, urgent)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color barFaceForeground: bar ? bar.barForeground : Color.foreground
   readonly property color barFaceDim: Qt.darker(barFaceForeground, 1.55)
@@ -53,13 +53,21 @@ Panel {
   // no urgent, no accent. Severity stays legible through the numbers, glyphs
   // and meter geometry, and the JSON `state` field still carries it for
   // anything scripting on top.
-  readonly property string colorMode: String(setting("colorMode", "full"))
-  readonly property bool colorBar: colorMode === "full" || colorMode === "bar-only"
-  readonly property bool colorPanel: colorMode === "full" || colorMode === "panel-only"
+  // An unrecognized value normalizes to "full": a hand-edited shell.json must
+  // not be able to silently take the color off both surfaces.
+  readonly property string colorMode: {
+    var v = String(setting("colorMode", "full"))
+    return ["full", "none", "bar-only", "panel-only"].indexOf(v) >= 0 ? v : "full"
+  }
+  readonly property bool barColored:   colorMode === "full" || colorMode === "bar-only"
+  readonly property bool panelColored: colorMode === "full" || colorMode === "panel-only"
+
+  readonly property bool showLabel: setting("showLabel", true) === true
+  readonly property bool vertical: bar ? bar.vertical : false
 
   // Ramp color for panel surfaces, flattened to plain foreground when the
   // panel is monochrome. The bar face has its own gate (see barColor).
-  function panelUsageColor(pct) { return colorPanel ? usageColor(pct) : foreground }
+  function panelUsageColor(pct) { return panelColored ? usageColor(pct) : foreground }
 
   // ---------------------------------------------------------------- data
 
@@ -366,7 +374,12 @@ Panel {
     return isFinite(p) ? clamp(p, 0, 100) : 0
   }
 
-  readonly property string barLabel: barWindow ? Math.round(barWindowPct) + "%" : ""
+  // The label gate lives here and not in the bar widget: the panel already owns
+  // the settings and the data, so one place decides whether there is a label.
+  readonly property string barLabel: {
+    if (!showLabel || vertical || !barWindow) return ""
+    return Math.round(barWindowPct) + "%"
+  }
 
   // A window OTHER than the one on the bar face sitting at critical severity.
   // The face reports its own window honestly; this is what stops it from
@@ -411,7 +424,7 @@ Panel {
   // The dot is a warning, so it takes the gauge's critical anchor (under the
   // same contrast floor as the label); monochrome keeps the mark but drops the
   // color, since the tooltip is what carries the meaning.
-  readonly property color criticalDotColor: colorBar ? legibleOnBar(gaugeCritical) : barFaceForeground
+  readonly property color criticalDotColor: barColored ? legibleOnBar(gaugeCritical) : barFaceForeground
 
   // The bar face takes the gauge ramp at the value it displays, so the same
   // number reads the same color on the bar and in the panel — under a contrast
@@ -419,7 +432,7 @@ Panel {
   // or stale data dims toward the muted shade.
   readonly property color barColor: {
     if (!report) return barFaceDim
-    return colorBar ? legibleOnBar(usageColor(barWindowPct)) : barFaceForeground
+    return barColored ? legibleOnBar(usageColor(barWindowPct)) : barFaceForeground
   }
 
   // Serving cached data. Drawn on the bar as ⏸, matching the CLI's bar text.
@@ -595,14 +608,19 @@ Panel {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // The shell's base handler covers open/close/show/hide/toggle; this one adds
+  // `refresh` so a keybind or a script can force a fetch without opening the
+  // panel. Overriding means restating the five, so `manageIpc: false` above
+  // turns the base one off and this is the only handler on the target.
   IpcHandler {
     target: root.ipcTarget
+
     function open(): void { root.open() }
     function close(): void { root.close() }
     function show(): void { root.open() }
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
-    function refresh(): string { root.refresh(true); return "ok" }
+    function refresh(): void { root.refresh(true) }
   }
 
   // ---------------------------------------------------------------- panel
@@ -682,8 +700,8 @@ Panel {
             visible: root.errorMessage !== ""
             width: parent.width
             implicitHeight: errorText.implicitHeight + Style.spacing.xl * 2
-            color: root.alpha(root.colorPanel ? root.urgent : root.foreground, 0.10)
-            borderSpec: Border.flat(root.alpha(root.colorPanel ? root.urgent : root.foreground, 0.35), 1)
+            color: root.alpha(root.panelColored ? root.urgent : root.foreground, 0.10)
+            borderSpec: Border.flat(root.alpha(root.panelColored ? root.urgent : root.foreground, 0.35), 1)
             radius: Style.cornerRadius
 
             Text {
@@ -800,7 +818,7 @@ Panel {
               ? ("HTTP " + root.lastError.http_status
                  + (String(root.lastError.message || "") !== "" ? " — " + root.lastError.message : ""))
               : ""
-            color: root.colorPanel ? root.urgent : root.foreground
+            color: root.panelColored ? root.urgent : root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
@@ -1064,7 +1082,7 @@ Panel {
         id: paceLabel
         textFormat: Text.PlainText
         text: root.paceText(windowRow.win)
-        color: root.colorPanel ? root.paceColor(windowRow.win) : root.dim
+        color: root.panelColored ? root.paceColor(windowRow.win) : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         anchors.right: parent.right
