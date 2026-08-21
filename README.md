@@ -92,6 +92,8 @@ Add the module to `~/.config/waybar/config.jsonc`:
 }
 ```
 
+Run `codexbar --help` for the full reference: the usage line, every flag, and the format placeholders.
+
 The bar shows your session use and the time until the reset. Put the pointer on the module to see all of your limits:
 
 <p align="center">
@@ -102,6 +104,7 @@ The bar shows your session use and the time until the reset. Put the pointer on 
 
 | Flag | What it does |
 |---|---|
+| `--help` | Prints the reference — usage, every flag, and the format placeholders — and exits 0. Also `-h` |
 | `--icon ICON` | Puts an icon before the text |
 | `--format FORMAT` | Sets the bar text. Default: `{session_pct}% · {session_reset}` |
 | `--tooltip-format FORMAT` | Replaces the tooltip with your own text |
@@ -125,6 +128,7 @@ Use these placeholders in `--format` and `--tooltip-format`. Replace `session` w
 
 | Placeholder | Shows |
 |---|---|
+| `{icon}` | The widget mark, in the Nerd Font: `󱙺` |
 | `{plan}` | The plan name, for example `Plus` |
 | `{session_pct}` | The use, in percent |
 | `{session_remaining_pct}` | What is left, in percent |
@@ -283,15 +287,17 @@ The CSS classes stay in monochrome mode. Remove the colors of codexbar. Then giv
 
 ```bash
 codexbar --json | jq
+codexbar --json --refresh   # force a fresh API fetch
 ```
 
 | Field | Contains |
 |---|---|
-| `schema_version` | The version of this format. It is `1` |
-| `error` | `null`, or an object with a `message` |
+| `schema_version` | The version of this format. It is `2` |
+| `error` | `null`, or an object with a `message` when there is no document at all |
 | `loading` | `true` while there is no data yet |
 | `plan` | The plan name |
 | `state` | The state of the fullest window: `low`, `mid`, `high`, or `critical` |
+| `max_pct` | The percentage of that fullest window |
 | `windows` | One entry for each limit. See below |
 | `credits` | `has_credits`, `unlimited`, `balance`, and the approximate number of messages |
 | `palette` | The colors of the gauge, and the `stops` that give the ramp |
@@ -301,9 +307,17 @@ codexbar --json | jq
 | `data_age_seconds` | The age of the data, in seconds |
 | `last_error` | The last error from the API, with `http_status` and `message` |
 
-Each entry in `windows` has: `id`, `label`, `group` (the model, for a per-model meter), `used_pct`, `remaining_pct`, `reset_at`, `reset_at_unix`, `window_seconds`, `elapsed_pct`, `state`, and a `pace` object.
+Each entry in `windows` has: `id`, `label`, `group` (the meter it belongs to, for a per-model limit), `used_pct`, `remaining_pct`, `reset_at`, `reset_at_unix`, `window_seconds`, `elapsed_pct`, `state`, and a `pace` object.
 
-`palette.stops` is the gauge itself: the colors, and the percentage where each color is. The value is a list of `{pct, color}`, from 0 to 100. The plugin reads the list, and it mixes the colors between the stops. The plugin does not know the limits. If you move a limit in the script, the bar, the tooltip, the `state` field, and the panel change together.
+The `pace` object has `delta_points` (your use minus the elapsed time, in percentage points), `state` (`under`, `on_pace`, `ahead`, or `hot`), `icon` and `indicator` (the arrow), `ratio_label` and `points_label` (the text that the tooltip prints).
+
+`palette.stops` is the gauge itself: the colors, and the percentage where each color is. The value is a list of `{pct, color}`, from 0 to 100. A frontend reads the list and mixes the colors between the stops, so it does not need to know the limits. If you move a limit in the script, the bar, the tooltip, the `state` field, and the panel change together.
+
+> [!IMPORTANT]
+> `schema_version` went from `1` to `2`, and version 2 breaks version 1. The reason: codexbar and claudebar now print the same document, so one script reads both. What changed: `pace.state` has four values, not three — `on_track` became `on_pace`, and a delta of +10 points or more is now `hot`; `pace` gained `icon` and `indicator`, the arrow that the tooltip prints; the document gained `max_pct`, the percentage of the fullest window.
+
+> [!NOTE]
+> The script always exits with code 0, in JSON mode also. Waybar hides a module that exits with an error, so a problem is data in the `error` field, not an exit code.
 
 ## How it works
 
