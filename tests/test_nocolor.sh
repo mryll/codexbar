@@ -100,10 +100,13 @@ command grep -qF "font_weight='bold'" <<<"$OUT" \
     && _ok "--no-color: font_weight kept" || _no "--no-color: font_weight kept" "bold attribute lost"
 _nc_run unset --no-color --tooltip-pace-pts
 assert_tip_has "--no-color: elapsed marker kept" "┃"
+# --frame is deprecated and a no-op: still ACCEPTED (an existing Waybar config
+# keeps working) and it draws nothing. The font pin survives monochrome, because
+# it is what keeps the rules the same width as the text they underline.
 _nc_run unset --no-color --frame
-assert_tip_has "--no-color: frame corner kept" "╭"
+assert_tip_lacks "--no-color --frame: draws no box" "╭"
 command grep -qF "font_family=" <<<"$OUT" \
-    && _ok "--no-color: frame font pin kept" || _no "--no-color: frame font pin kept" "font_family lost"
+    && _ok "--no-color: font pin kept" || _no "--no-color: font pin kept" "font_family lost"
 _nc_run unset --no-color --icon '󰚩'
 assert_text_has "--no-color: icon kept" "󰚩"
 

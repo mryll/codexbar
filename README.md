@@ -3,13 +3,13 @@
 [![AUR version](https://img.shields.io/aur/version/codexbar)](https://aur.archlinux.org/packages/codexbar)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-codexbar shows your use of the OpenAI Codex subscription in your status bar. It reads every limit that the Codex API reports. These limits are the session (5h) window, the weekly window, code review, the per-model meters, and the credits balance. It also gives you a warning before a limit stops your work.
+codexbar shows your use of the OpenAI Codex subscription in [Waybar](https://github.com/Alexays/Waybar) and in the [Omarchy](https://omarchy.org) shell. It reads every limit that the Codex API reports. These limits are the session (5h) window, the weekly window, code review, the per-model meters, and the credits balance. It also gives you a warning before a limit stops your work.
 
-codexbar runs in two places: as a Waybar module, and as a native plugin for the [Omarchy](https://github.com/basecamp/omarchy) shell. One script supplies both.
+The same core drives both frontends, so a number reads the same on either one:
 
-<p align="center">
-  <img src="screenshots/omarchy-panel.png" alt="The Omarchy panel: one meter for each usage window" width="342">
-</p>
+| The Omarchy shell plugin | The Waybar module |
+| :---: | :---: |
+| <img src="screenshots/omarchy-desktop.png" alt="codexbar in the Omarchy shell: the bar face and the usage panel"> | <img src="screenshots/waybar-desktop.png" alt="codexbar in Waybar: the bar face and the tooltip"> |
 
 ## Contents
 
@@ -109,7 +109,7 @@ The bar shows your session use and the time until the reset. Put the pointer on 
 | `--format FORMAT` | Sets the bar text. Default: `{session_pct}% · {session_reset}` |
 | `--tooltip-format FORMAT` | Replaces the tooltip with your own text |
 | `--remaining` | Counts what is left, not what is used |
-| `--pace-tolerance N` | Sets the difference from the pace that is still "on track". Default: `5` |
+| `--pace-tolerance N` | Sets the difference from the pace that is still "on pace". Default: `5` |
 | `--format-pace-color` | Gives the pace indicator its own color in the bar |
 | `--tooltip-pace-pts` | Uses point-based pace in the tooltip, and adds a pace mark to each bar |
 | `--frame` | Draws a box around the tooltip |
@@ -157,11 +157,11 @@ codexbar --remaining                                   # 58% · 1h 30m
 The plugin gives you a real user interface instead of a text tooltip. The bar shows the Codex icon and one percentage. A click opens a panel with one meter for each window. Each meter has an animated bar with a mark for the pace, the percentage, the time until the reset, and the credits.
 
 <p align="center">
-  <img src="screenshots/omarchy-desktop.png" alt="codexbar in the Omarchy bar, with its panel open" width="960">
+  <img src="screenshots/omarchy-bar.png" alt="The widget in the Omarchy bar" width="68">
 </p>
 
 <p align="center">
-  <img src="screenshots/omarchy-bar.png" alt="The widget in the Omarchy bar" width="68">
+  <img src="screenshots/omarchy-panel.png" alt="The codexbar panel: one meter for each usage window" width="342">
 </p>
 
 Install the plugin. Then add the plugin to your bar:
@@ -180,6 +180,13 @@ Then put the widget in your bar, in `~/.config/omarchy/shell.json`:
 ```
 
 Mouse actions: **left click** opens the panel, **middle click** gets new data, and **right click** opens the Codex usage page. The footer of the panel ends with a refresh control (󰑐), next to the time of the last update. The control stays disabled while a fetch runs.
+
+The plugin also answers the shell's IPC, so a keybind or a script can drive it without the mouse:
+
+```bash
+qs ipc call mryll.codexbar toggle    # open or close the panel
+qs ipc call mryll.codexbar refresh   # fetch now, without opening anything
+```
 
 ### Settings
 
@@ -343,9 +350,10 @@ More than one instance at the same time is safe. The instances use a lock file a
 
 ## Related
 
-- [claudebar](https://github.com/mryll/claudebar) — Claude usage
+- [claudebar](https://github.com/mryll/claudebar) — Claude AI plan usage
 - [logibar](https://github.com/mryll/logibar) — the battery of Logitech devices
 - [meteobar](https://github.com/mryll/meteobar) — the weather, from Open-Meteo
-- [tickerbar](https://github.com/mryll/tickerbar) — prices of crypto, stocks, and forex
-- [Omarchy](https://github.com/basecamp/omarchy) — the Linux setup for this widget
+- [printbar](https://github.com/mryll/printbar) — any printer: supplies, trays and queue
+- [tickerbar](https://github.com/mryll/tickerbar) — prices of crypto, stocks, indices, commodities and forex
+- [Omarchy](https://github.com/basecamp/omarchy) — the Linux setup for these widgets
 - [Waybar](https://github.com/Alexays/Waybar) — the status bar for Wayland
