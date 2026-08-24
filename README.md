@@ -20,6 +20,7 @@ The same core drives both frontends, so a number reads the same on either one:
 - [Configuration](#configuration)
 - [Omarchy shell plugin](#omarchy-shell-plugin)
 - [Theming](#theming)
+- [Tooltip font](#tooltip-font)
 - [Monochrome mode](#monochrome-mode)
 - [Structured JSON output](#structured-json-output)
 - [How it works](#how-it-works)
@@ -112,8 +113,8 @@ The bar shows your session use and the time until the reset. Put the pointer on 
 | `--pace-tolerance N` | Sets the difference from the pace that is still "on pace". Default: `5` |
 | `--format-pace-color` | Gives the pace indicator its own color in the bar |
 | `--tooltip-pace-pts` | Uses point-based pace in the tooltip, and adds a pace mark to each bar |
-| `--frame` | Draws a box around the tooltip |
-| `--frame-font FONT` | Sets the font of the box. Default: `JetBrainsMono Nerd Font Mono` |
+| `--tooltip-font FONT` | Font family (or Pango family list) the tooltip is pinned to. Default: `JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace`. It must be monospace — see [Tooltip font](#tooltip-font) |
+| `--frame`, `--frame-font` | **DEPRECATED**, still accepted so an existing config keeps working. `--frame` drew a bordered card around the tooltip and is now a no-op; `--frame-font` is an alias for `--tooltip-font` |
 | `--color-low HEX` | Sets the color for 0–49% |
 | `--color-mid HEX` | Sets the color for 50–74% |
 | `--color-high HEX` | Sets the color for 75–89% |
@@ -250,6 +251,29 @@ The pywal step also works with [pywal16](https://github.com/eylles/pywal16) and 
 
 > [!NOTE]
 > The `--color-*` flags now accept a hex color (`#RGB`, `#RRGGBB`) or a one-word color name (`tomato`). codexbar refuses a value that contains a quotation mark, a bracket, or a space. Such a value can break the markup of the bar. codexbar also refuses a name of more than one word, for example `light blue`. You must use the hex value of the color.
+
+## Tooltip font
+
+The tooltip is pinned to a monospace font. That is not decoration: its rules are box-drawing characters, and in a proportional font one of those is nearly twice as wide as a letter. The tooltip then sizes itself to the rules, and a dead margin opens to the right of the text. Waybar draws the tooltip in a GTK window that ignores `font-family` from your CSS, so the markup is the only place this can be said.
+
+The default is a **list** of families, tried in order:
+
+```
+JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace
+```
+
+Pango falls through to the next name when one is not installed. This matters: the Arch package `ttf-jetbrains-mono-nerd` does **not** ship the `…Mono` family, so pinning that one name alone used to fall back to your system's proportional font without saying so.
+
+To use a different font, name any monospace family (or your own list):
+
+```bash
+codexbar --tooltip-font "FiraCode Nerd Font Mono"
+```
+
+> [!NOTE]
+> **`--frame` and `--frame-font` are deprecated.** `--frame` drew the tooltip as a bordered card. It is still accepted, so an existing Waybar config keeps working, but it now does nothing; `--frame-font` is an alias for `--tooltip-font`.
+>
+> The box was a second way of drawing the same content — more code, more documentation, more screenshots — and it only lined up when the pinned font was a complete Mono Nerd Font. Pinning the font on the one remaining tooltip gives the alignment without the box.
 
 ## Monochrome mode
 
