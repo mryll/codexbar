@@ -9,7 +9,7 @@
 # unaffected).
 source "$(dirname "$0")/lib.sh"
 
-BASE_REF="${BASE_REF:-0db9f78}"   # design pass: the pace arrow moved to the text that explains it
+BASE_REF="${BASE_REF:-0a0d5e3}"   # the tooltip meter reaches the right edge
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 FIX="$(cat "$(dirname "$0")/fixtures/baseline.json")"
 
