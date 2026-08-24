@@ -73,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/mryll/codexbar/master/codexbar \
 ```
 
 <p align="center">
-  <img src="screenshots/waybar-bar.png" alt="codexbar in Waybar" width="144">
+  <img src="screenshots/waybar-bar.png" alt="codexbar in Waybar" width="95">
 </p>
 
 ## Quick start
@@ -158,7 +158,7 @@ codexbar --remaining                                   # 58% · 1h 30m
 The plugin gives you a real user interface instead of a text tooltip. The bar shows the Codex icon and one percentage. A click opens a panel with one meter for each window. Each meter has an animated bar with a mark for the pace, the percentage, the time until the reset, and the credits.
 
 <p align="center">
-  <img src="screenshots/omarchy-bar.png" alt="The widget in the Omarchy bar" width="68">
+  <img src="screenshots/omarchy-bar.png" alt="The widget in the Omarchy bar" width="57">
 </p>
 
 <p align="center">
