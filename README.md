@@ -233,14 +233,13 @@ The Waybar tooltip follows the same theme:
 
 And so does the Omarchy panel:
 
-<p align="center">
-  <img src="screenshots/omarchy-theme-flexoki-light.png" alt="Flexoki Light" width="200">
-  <img src="screenshots/omarchy-theme-rose-pine.png" alt="Rosé Pine" width="200">
-  <img src="screenshots/omarchy-theme-hackerman.png" alt="Hackerman" width="200">
-  <img src="screenshots/omarchy-theme-ristretto.png" alt="Ristretto" width="200">
-  <img src="screenshots/omarchy-theme-nord.png" alt="Nord" width="200">
-  <img src="screenshots/omarchy-theme-kanagawa.png" alt="Kanagawa" width="200">
-</p>
+| Flexoki Light | Rosé Pine | Hackerman |
+|:---:|:---:|:---:|
+| ![Flexoki Light](screenshots/omarchy-theme-flexoki-light.png) | ![Rosé Pine](screenshots/omarchy-theme-rose-pine.png) | ![Hackerman](screenshots/omarchy-theme-hackerman.png) |
+
+| Ristretto | Nord | Kanagawa |
+|:---:|:---:|:---:|
+| ![Ristretto](screenshots/omarchy-theme-ristretto.png) | ![Nord](screenshots/omarchy-theme-nord.png) | ![Kanagawa](screenshots/omarchy-theme-kanagawa.png) |
 
 A theme can give its colors these names (`green`, `yellow`, `orange`, `red`), or it can use the old names (`color1`, `color2`, `color3`). codexbar prefers the names, because the names show a difference between red and orange, and the gauge needs the two colors. codexbar ignores a color that is not valid, and that color keeps its default value.
 

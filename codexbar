@@ -1565,14 +1565,8 @@ if [[ -n "$TOOLTIP_FORMAT" ]]; then
     t=$(apply_format "$TOOLTIP_FORMAT")
     [[ -n "$_stale_note" ]] && t+=$'\n'"<span foreground='${ORANGE}'>${_stale_note}</span>"
 else
-    # Default rich Pango tooltip — tooltip-specific bars may carry an elapsed marker.
-    if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
-        tip_session_bar=$(display_bar "$session_pct" "$session_elapsed" marker)
-        tip_weekly_bar=$(display_bar "$weekly_pct" "$weekly_elapsed" marker)
-    else
-        tip_session_bar=$(display_bar "$session_pct" "$session_elapsed")
-        tip_weekly_bar=$(display_bar "$weekly_pct" "$weekly_elapsed")
-    fi
+    # Default rich Pango tooltip. The meters are parked and resolved after the
+    # width pass — refer to add_meter below.
     s_cd="$s_cd_val"
     w_cd="$w_cd_val"
 
@@ -1582,8 +1576,28 @@ else
 
     strip_tags() { sed 's/<[^>]*>//g' <<< "$1"; }
 
-    # Right-align a plain value label to a fixed column (width 6 fits "100% ↑").
-    _val_pad() { local w=6 n=${#1}; (( n > w )) && w=$n; printf '%*s' $(( w - n )) ''; }
+    # --- The meter row spans the tooltip ---------------------------------
+    # A meter row is <indent><bar><gap><value>, and the value is right-aligned
+    # on the tooltip's inner width — the same column the longest text line
+    # ends on. The bar length therefore depends on the WIDEST line, which is
+    # not known while the lines are still being collected. So a meter parks a
+    # placeholder in `lines` plus one entry in the parallel arrays below, and
+    # the resolution happens after the width pass.
+    #
+    # Parallel arrays, not one packed token: the value labels and colors are
+    # markup-adjacent, and splitting a packed record back apart in bash is one
+    # quoting bug waiting to happen.
+    TIP_IND=3           # spaces before the bar
+    TIP_VAL=6           # value column, wide enough for "100% ↑"
+    TIP_GAP_MIN=2       # smallest gap between the bar and the value
+    TIP_BAR_MIN=20      # a short tooltip still gets a readable bar
+    TIP_BAR_MAX=48      # one long line must not stretch the bar into a ruler
+    meter_pct=() meter_elapsed=() meter_color=() meter_label=()
+    add_meter() {  # add_meter <pct> <elapsed> <value_color> <value_label>
+        meter_pct+=("$1"); meter_elapsed+=("$2")
+        meter_color+=("$3"); meter_label+=("$4")
+        lines+=("METER:$(( ${#meter_pct[@]} - 1 ))")
+    }
 
     # Collect all content lines into an array
     lines=()
@@ -1595,28 +1609,23 @@ else
     session_label=$(main_window_label "$session_window_s" 0)
     lines+=(" <span foreground='${FG}'>  $(main_window_icon "$session_label")  ${session_label}</span>")
     _lbl_s="$(display_pct "$session_pct")%"
-    lines+=("   ${tip_session_bar}  $(_val_pad "$_lbl_s")<span font_weight='bold' foreground='${session_color}'>${_lbl_s}</span>")
+    add_meter "$session_pct" "$session_elapsed" "$session_color" "$_lbl_s"
     lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${s_cd}</span><span foreground='${DIM}'>  ·  ${session_pace_indicator} ${session_pace_pts}</span>")
     if [[ "$has_secondary" == "true" ]]; then
         weekly_label=$(main_window_label "$weekly_window_s" 1)
         lines+=("")
         lines+=(" <span foreground='${FG}'>  $(main_window_icon "$weekly_label")  ${weekly_label}</span>")
         _lbl_w="$(display_pct "$weekly_pct")%"
-        lines+=("   ${tip_weekly_bar}  $(_val_pad "$_lbl_w")<span font_weight='bold' foreground='${weekly_color}'>${_lbl_w}</span>")
+        add_meter "$weekly_pct" "$weekly_elapsed" "$weekly_color" "$_lbl_w"
         lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${w_cd}</span><span foreground='${DIM}'>  ·  ${weekly_pace_indicator} ${weekly_pace_pts}</span>")
     fi
 
     if [[ "$has_review" == "true" ]]; then
-        if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
-            tip_review_bar=$(display_bar "$review_pct" "$review_elapsed" marker)
-        else
-            tip_review_bar=$(display_bar "$review_pct" "$review_elapsed")
-        fi
         r_cd=$(countdown "$review_reset_at")
         lines+=("")
         lines+=(" <span foreground='${FG}'>  󰑕  Code review</span>")
         _lbl_r="$(display_pct "$review_pct")%"
-        lines+=("   ${tip_review_bar}  $(_val_pad "$_lbl_r")<span font_weight='bold' foreground='${review_color}'>${_lbl_r}</span>")
+        add_meter "$review_pct" "$review_elapsed" "$review_color" "$_lbl_r"
         lines+=(" <span foreground='${DIM}'>  󰥔  Resets in ${r_cd}</span><span foreground='${DIM}'>  ·  ${review_pace_indicator} ${review_pace_pts}</span>")
     fi
 
@@ -1645,16 +1654,14 @@ else
                 add_primary_pts=$(cut -d' ' -f7-8 <<< "$_add_primary_pace")
                 if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
                     add_primary_tip_pace="$add_primary_indicator"
-                    add_primary_bar=$(display_bar "$add_primary_pct" "$add_primary_elapsed" marker)
                 else
                     add_primary_tip_pace="$add_primary_pace"
-                    add_primary_bar=$(display_bar "$add_primary_pct" "$add_primary_elapsed")
                 fi
                 add_primary_label=$(main_window_label "$add_primary_window" 0)
                 lines+=("")
                 lines+=(" <span foreground='${FG}'>  󰔟  ${add_primary_label}</span>")
                 _lbl_ap="$(display_pct "$add_primary_pct")%"
-                lines+=("   ${add_primary_bar}  $(_val_pad "$_lbl_ap")<span font_weight='bold' foreground='$(color_for "$add_primary_pct")'>${_lbl_ap}</span>")
+                add_meter "$add_primary_pct" "$add_primary_elapsed" "$(color_for "$add_primary_pct")" "$_lbl_ap"
                 lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_primary_reset")</span><span foreground='${DIM}'>  ·  ${add_primary_indicator} ${add_primary_pts}</span>")
             fi
 
@@ -1664,16 +1671,14 @@ else
                 add_secondary_pts=$(cut -d' ' -f7-8 <<< "$_add_secondary_pace")
                 if [[ "$TOOLTIP_PACE_PTS" == "true" ]]; then
                     add_secondary_tip_pace="$add_secondary_indicator"
-                    add_secondary_bar=$(display_bar "$add_secondary_pct" "$add_secondary_elapsed" marker)
                 else
                     add_secondary_tip_pace="$add_secondary_pace"
-                    add_secondary_bar=$(display_bar "$add_secondary_pct" "$add_secondary_elapsed")
                 fi
                 add_secondary_label=$(main_window_label "$add_secondary_window" 1)
                 lines+=("")
                 lines+=(" <span foreground='${FG}'>  󰃰  ${add_secondary_label}</span>")
                 _lbl_as="$(display_pct "$add_secondary_pct")%"
-                lines+=("   ${add_secondary_bar}  $(_val_pad "$_lbl_as")<span font_weight='bold' foreground='$(color_for "$add_secondary_pct")'>${_lbl_as}</span>")
+                add_meter "$add_secondary_pct" "$add_secondary_elapsed" "$(color_for "$add_secondary_pct")" "$_lbl_as"
                 lines+=(" <span foreground='${DIM}'>  󰥔  Resets in $(countdown "$add_secondary_reset")</span><span foreground='${DIM}'>  ·  ${add_secondary_indicator} ${add_secondary_pts}</span>")
             fi
         done <<< "$additional_limits_tsv"
@@ -1733,14 +1738,52 @@ else
     lines+=(" <span foreground='${DIM}'>  󰅐  Updated ${_updated}</span>${_stale_suffix}")
 
     # Calculate max width from content
+    # The meters are skipped: their width is DERIVED from this number, so
+    # measuring them here would be circular.
     max_w=0
     for line in "${lines[@]}"; do
-        [[ "$line" == "SEP" ]] && continue
+        [[ "$line" == "SEP" || "$line" == METER:* ]] && continue
         [[ "$line" == CENTER* ]] && line="${line#CENTER}"
         plain=$(strip_tags "$line")
         (( ${#plain} > max_w )) && max_w=${#plain}
     done
     INNER_W=$(( max_w + 1 ))
+
+    # ONE bar length for the whole tooltip. The meters stack, so a reader
+    # compares them against each other; a per-row length would turn that
+    # comparison into a lie.
+    #
+    # A rule carries one leading space and INNER_W-2 cells, so it ends on
+    # column INNER_W-1. THAT column is the tooltip's right edge, and the value
+    # has to land on it — not on INNER_W, which nothing else reaches.
+    tip_right=$(( INNER_W - 1 ))
+    tip_bar_len=$(( tip_right - TIP_IND - TIP_GAP_MIN - TIP_VAL ))
+    (( tip_bar_len < TIP_BAR_MIN )) && tip_bar_len=$TIP_BAR_MIN
+    (( tip_bar_len > TIP_BAR_MAX )) && tip_bar_len=$TIP_BAR_MAX
+    # A clamp at the low end makes the meter row wider than every text line, so
+    # the rules grow to match it and the right edge stays one straight line.
+    _row_w=$(( TIP_IND + tip_bar_len + TIP_GAP_MIN + TIP_VAL ))
+    if (( _row_w > tip_right )); then tip_right=$_row_w; INNER_W=$(( tip_right + 1 )); fi
+
+    # make_bar reads BAR_LEN. The bar TEXT is already built at this point, so
+    # the tooltip is free to move it.
+    BAR_LEN=$tip_bar_len
+
+    # Resolve the parked meters now that the geometry is known.
+    printf -v _tip_ind '%*s' "$TIP_IND" ''
+    _tip_marker=""; [[ "$TOOLTIP_PACE_PTS" == "true" ]] && _tip_marker=marker
+    for _mi_r in "${!lines[@]}"; do
+        [[ "${lines[$_mi_r]}" == METER:* ]] || continue
+        _m=${lines[$_mi_r]#METER:}
+        _mbar=$(display_bar "${meter_pct[$_m]}" "${meter_elapsed[$_m]}" $_tip_marker)
+        _mlbl="${meter_label[$_m]}"
+        # The gap absorbs the label's own width, so the LAST character of the
+        # value lands on the right edge whatever the label says.
+        _mpad=$(( tip_right - TIP_IND - tip_bar_len - ${#_mlbl} ))
+        (( _mpad < 1 )) && _mpad=1
+        printf -v _mgap '%*s' "$_mpad" ''
+        lines[$_mi_r]="${_tip_ind}${_mbar}${_mgap}<span font_weight='bold' foreground='${meter_color[$_m]}'>${_mlbl}</span>"
+    done
 
     # Build separator dynamically
     sep=""
