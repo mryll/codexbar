@@ -303,6 +303,54 @@ NET_LONG_BUDGET=$(_env_uint "${CODEXBAR_TEST_NET_LONG_BUDGET:-}" 20)
 NET_BOOT_CACHE_AGE=600 # cache older than this → boot-like start
 NET_WAIT_RECENT=45     # .net_wait younger than this → a sibling already waited
 
+# --- Bounded reads of files this script does not own -------------------------
+# The plugin runs INSIDE the long-lived omarchy-shell process, so a read that
+# never returns takes the whole shell down with it, not just this module. Every
+# path below is written by someone else — the Codex CLI, the Omarchy theme,
+# pywal — and any of them can be swapped for a FIFO (the read blocks for ever)
+# or for a file that never stops growing (the shell eats the memory).
+# Config-shaped inputs get the roomier cap; the credential and the cache are
+# small by construction, so a bigger one would only hide corruption.
+FILE_MAX_CONFIG=$((256 * 1024))
+FILE_MAX_SECRET=$((64 * 1024))
+# Responses are a few KiB; 2 MiB is far past anything the API can mean.
+HTTP_MAX_BYTES=$((2 * 1024 * 1024))
+
+read_bounded() {  # read_bounded PATH MAXBYTES
+    # -f is false for a FIFO, a socket, a directory and a device, so the FIFO
+    # never gets opened; head -c bounds what a regular file can cost us.
+    [[ -f "$1" ]] || return 1
+    LC_ALL=C head -c "$2" -- "$1"
+}
+
+# `${#var}` counts CHARACTERS under a UTF-8 locale, which under-counts a byte
+# budget; wc -c is the byte truth whatever the locale.
+byte_len() { LC_ALL=C printf '%s' "$1" | LC_ALL=C wc -c; }
+
+# --- Credentials reach curl through stdin ------------------------------------
+# Every argument of a running process is world-readable through
+# /proc/PID/cmdline (-r--r--r--), so a token on curl's command line is readable
+# by every local user for as long as the request lasts. The environment is
+# narrower (/proc/PID/environ is -r--------) but it is still process metadata.
+# stdin appears in neither, and unlike a temp config file the secret never
+# touches the disk at all: nothing to chmod, nothing to unlink, no residue if
+# the process dies in a way no trap covers. The headers go in on `--config -`
+# and the refresh body on `--data @-`.
+#
+# curl parses a config stream one option per LINE, wherever the stream comes
+# from, so stdin does NOT close the injection: a value carrying a real newline
+# ends the value and turns the rest into fresh options. `url = https://…` plus
+# `insecure` makes curl run a SECOND transfer with the header attached — and
+# --proto '=https' does not stop that, it only rules out the scheme. Escaping is
+# the defence. Quotes and backslashes are escaped; a newline has no meaning in a
+# JWT or an account id, so it is dropped rather than encoded.
+cfg_escape() {
+    local s=${1//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/}
+    printf '%s' "${s//$'\r'/}"
+}
+
 # --- Theme colors ---
 # Blend two hex colors (#RRGGBB) by averaging their RGB components
 hex_blend() {
@@ -362,7 +410,7 @@ load_theme_colors() {
                     orange)     named_orange="$val" ;;
                 esac
             fi
-        done < "$theme_file"
+        done < <(read_bounded "$theme_file" "$FILE_MAX_CONFIG")
         # Map theme colors to widget colors. EVERY value is validated first: a
         # theme is third-party input, and an unvalidated one both lands inside
         # Pango attributes and feeds base-16 arithmetic below. A bad value is
@@ -418,7 +466,7 @@ load_pywal_colors() {
     # shift every later value into the wrong variable. "-" is not valid hex,
     # so norm_hex_color rejects it and the built-in default survives.
     local raw
-    raw=$(jq -r '[
+    raw=$(read_bounded "$wal_file" "$FILE_MAX_CONFIG" | jq -r '[
         ((.special.foreground | strings) // "-"),
         ((.special.background | strings) // "-"),
         ((.colors.color1      | strings) // "-"),
@@ -426,7 +474,7 @@ load_pywal_colors() {
         ((.colors.color3      | strings) // "-"),
         ((.colors.color4      | strings) // "-"),
         ((.special.cursor     | strings) // "-")
-      ] | @tsv' "$wal_file" 2>/dev/null) || return 1
+      ] | @tsv' 2>/dev/null) || return 1
     [[ -n "$raw" ]] || return 1
 
     local w_fg w_bg w_red w_green w_yellow w_blue w_cursor v
@@ -893,7 +941,7 @@ _lockfile="$CACHE_DIR/.fetch.lock"
 
 _fetch_usage() {
     if [[ -f "$cache_file" ]] && (( cache_age < CACHE_TTL )); then
-        usage=$(<"$cache_file")
+        usage=$(read_bounded "$cache_file" "$FILE_MAX_SECRET") || usage=""
         return
     fi
 
@@ -903,7 +951,7 @@ _fetch_usage() {
             # stale flag, or show neutral "Loading…" if no usable cache exists.
             # No disk markers, no desktop notification.
             if [[ -f "$cache_file" ]] && (( cache_age <= WEEKLY_WINDOW )); then
-                usage=$(<"$cache_file")
+                usage=$(read_bounded "$cache_file" "$FILE_MAX_SECRET") || usage=""
                 transient_stale=true
                 return
             fi
@@ -912,7 +960,7 @@ _fetch_usage() {
         # Hard refresh failure — preserve actionable signal (.last_error was
         # written by the refresh path so the tooltip can explain the failure).
         if [[ -f "$cache_file" ]] && (( cache_age <= WEEKLY_WINDOW )); then
-            usage=$(<"$cache_file")
+            usage=$(read_bounded "$cache_file" "$FILE_MAX_SECRET") || usage=""
             if [[ ! -f "$stale_marker" ]]; then
                 touch "$stale_marker"
                 command -v notify-send &>/dev/null && \
@@ -928,10 +976,19 @@ _fetch_usage() {
     # Transient failures (no HTTP response: DHCP/DNS still settling at boot,
     # brief blip) are retried until the shared deadline — one missed dispatch
     # otherwise means stale data for a full Waybar interval.
-    _fetch_args=(-s --max-time 10 -w $'\n%{http_code}' "$API_URL" -H "Authorization: Bearer $access_token")
-    [[ -n "$account_id" ]] && _fetch_args+=(-H "chatgpt-account-id: $account_id")
+    # The bearer token AND the account id identify the user, so both travel on
+    # stdin rather than argv. --proto pins https so no crafted URL can carry the
+    # token in cleartext, and --max-filesize caps what a hostile or broken
+    # server can make this shell hold. The config is rebuilt on every retry
+    # because each curl consumes its own stdin.
+    _fetch_cfg="header = \"Authorization: Bearer $(cfg_escape "$access_token")\""
+    if [[ -n "$account_id" ]]; then
+        _fetch_cfg+=$'\n'"header = \"chatgpt-account-id: $(cfg_escape "$account_id")\""
+    fi
+    _fetch_args=(-s --max-time 10 --max-filesize "$HTTP_MAX_BYTES" --proto '=https'
+                 --config - -w $'\n%{http_code}' "$API_URL")
     while :; do
-        _resp_body=$(curl "${_fetch_args[@]}") || true
+        _resp_body=$(printf '%s\n' "$_fetch_cfg" | curl "${_fetch_args[@]}") || true
         _http_code="${_resp_body##*$'\n'}"
         _resp_body="${_resp_body%$'\n'"$_http_code"}"
         # Normalize bogus codes (e.g. raw body without curl write-out suffix) to 000.
@@ -940,6 +997,12 @@ _fetch_usage() {
         if (( SECONDS >= net_deadline )); then break; fi
         sleep "$NET_RETRY_DELAY"
     done
+    # Belt for --max-filesize: this curl refuses a declared Content-Length
+    # overrun before a byte moves, but aborts a CHUNKED one only AFTER writing
+    # the cap — and the -w suffix still arrives, so a truncated body would read
+    # as a healthy 200. Reaching the cap is never a real answer; drop it and
+    # fall through to the stale-cache path.
+    if (( $(byte_len "$_resp_body") >= HTTP_MAX_BYTES )); then _resp_body=""; fi
 
     if [[ "$_http_code" == "200" ]] && [[ -n "$_resp_body" ]] && jq -e '.rate_limit' <<< "$_resp_body" &>/dev/null; then
         usage="$_resp_body"
@@ -953,13 +1016,13 @@ _fetch_usage() {
         # on disk), or show neutral "Loading…".
         if [[ "$net_long" == "true" ]]; then touch "$net_wait_marker" 2>/dev/null || true; fi
         if [[ -f "$cache_file" ]] && (( cache_age <= WEEKLY_WINDOW )); then
-            usage=$(<"$cache_file")
+            usage=$(read_bounded "$cache_file" "$FILE_MAX_SECRET") || usage=""
             transient_stale=true
         else
             loading_network
         fi
     elif [[ -f "$cache_file" ]]; then
-        usage=$(<"$cache_file")
+        usage=$(read_bounded "$cache_file" "$FILE_MAX_SECRET") || usage=""
         touch "$stale_marker"
         if [[ "$_http_code" =~ ^[45][0-9]{2}$ ]]; then
             _err_msg=$(jq -r '.error.message // empty' <<< "$_resp_body" 2>/dev/null) || true
@@ -975,6 +1038,12 @@ _fetch_usage() {
 # read and our refresh attempt (the provider rotates refresh tokens); reading
 # auth.json only under the lock prevents a stale-token refresh from hard-failing
 # with a spurious "run codex login" while credentials are actually fine.
+#
+# open(2) for WRITE blocks on a FIFO exactly as the read side does — it waits
+# for a reader that never comes — and this redirect is the first thing every run
+# does, so a FIFO planted here freezes omarchy-shell before anything is drawn.
+# The path is predictable, so demand a regular file (or nothing yet) first.
+[[ ! -e "$_lockfile" || -f "$_lockfile" ]] || die "Cache lock is not a regular file.\n$_lockfile"
 { exec 9>"$_lockfile"; } 2>/dev/null || die "Cannot open cache lock.\n$_lockfile is not writable."
 # Generous wait: a boot-like sibling may hold the lock for the long budget plus
 # in-flight curls (worst ≈ NET_LONG_BUDGET + 25s refresh + 10s fetch ≈ 57s);
@@ -1006,7 +1075,7 @@ net_deadline=$(( SECONDS + net_budget ))
 
 # --- Read credentials (under the lock) ---
 [[ -f "$CREDS" ]] || die "No credentials.\nRun <b>codex login</b> to log in."
-creds=$(<"$CREDS")
+creds=$(read_bounded "$CREDS" "$FILE_MAX_SECRET") || die "Unreadable credentials.\nRun <b>codex login</b> to log in."
 jq -e . <<< "$creds" &>/dev/null || die "Invalid credentials file.\nRun <b>codex login</b> to log in."
 access_token=$(jq -r '.tokens.access_token // empty' <<< "$creds")
 refresh_token=$(jq -r '.tokens.refresh_token // empty' <<< "$creds")
@@ -1032,12 +1101,18 @@ if (( expires_s < now_s + REFRESH_BUFFER )); then
     # Synchronous refresh — 25s timeout covers cold boot when DHCP is still settling.
     # Transient failures (no HTTP response) are retried until the shared deadline —
     # same policy as the usage fetch — so a cold-boot race doesn't cost a full interval.
-    refresh_body=$(jq -nc --arg ci "$CLIENT_ID" --arg rt "$refresh_token" \
-                     '{client_id:$ci, grant_type:"refresh_token", refresh_token:$rt, scope:"openid profile email"}')
+    # The refresh token must miss jq's argv as well: /proc/PID/cmdline is
+    # world-readable, /proc/PID/environ is owner-only.
+    refresh_body=$(CODEXBAR_RT="$refresh_token" jq -nc --arg ci "$CLIENT_ID" \
+                     '{client_id:$ci, grant_type:"refresh_token", refresh_token:env.CODEXBAR_RT, scope:"openid profile email"}')
+    # That body IS the credential, so it goes in on stdin. --data @- takes it
+    # verbatim: no config grammar, so no line to inject into either. Content-Type
+    # is not a secret and stays on the command line.
+    _refresh_args=(-s --max-time 25 --max-filesize "$HTTP_MAX_BYTES" --proto '=https'
+                   -w '\n%{http_code}' -X POST "$TOKEN_URL"
+                   -H "Content-Type: application/json" --data @-)
     while :; do
-        refresh_raw=$(curl -s --max-time 25 -w '\n%{http_code}' -X POST "$TOKEN_URL" \
-            -H "Content-Type: application/json" \
-            --data "$refresh_body") || true
+        refresh_raw=$(printf '%s' "$refresh_body" | curl "${_refresh_args[@]}") || true
         refresh_code="${refresh_raw##*$'\n'}"
         resp="${refresh_raw%$'\n'"$refresh_code"}"
         # Normalize bogus codes (e.g. raw body without curl write-out suffix) to 000.
@@ -1046,6 +1121,8 @@ if (( expires_s < now_s + REFRESH_BUFFER )); then
         if (( SECONDS >= net_deadline )); then break; fi
         sleep "$NET_RETRY_DELAY"
     done
+    # Same belt as the usage fetch — an oversized refresh answer is not an answer.
+    if (( $(byte_len "$resp") >= HTTP_MAX_BYTES )); then resp=""; fi
 
     if [[ "$refresh_code" == "200" ]] && [[ -n "$resp" ]] && jq -e '.access_token' <<< "$resp" &>/dev/null; then
         new_at=$(jq -r '.access_token // empty' <<< "$resp")
@@ -1056,12 +1133,18 @@ if (( expires_s < now_s + REFRESH_BUFFER )); then
         [[ -n "$new_at" ]] && access_token="$new_at"
 
         tmp=$(mktemp)
-        jq --arg at "${new_at:-$access_token}" \
-           --arg rt "${new_rt:-$refresh_token}" \
-           --arg idt "${new_idt:-$id_token_raw}" \
-           --arg lr "$now_iso" \
-           '.tokens.access_token=$at | .tokens.refresh_token=$rt | .tokens.id_token=$idt | .last_refresh=$lr' \
-           "$CREDS" > "$tmp" && mv "$tmp" "$CREDS"
+        # Same argv rule for the three new token values. The input is the
+        # bounded copy already validated under this lock, not a fresh read of
+        # $CREDS: that bounds the read and shuts the window in which the file
+        # could be swapped for a FIFO between the check and the rewrite. A
+        # failed write leaves the old file alone — the in-memory token still
+        # serves this run, and exiting non-zero would break the widget.
+        CODEXBAR_AT="${new_at:-$access_token}" \
+        CODEXBAR_RT="${new_rt:-$refresh_token}" \
+        CODEXBAR_IDT="${new_idt:-$id_token_raw}" \
+        jq --arg lr "$now_iso" \
+           '.tokens.access_token=env.CODEXBAR_AT | .tokens.refresh_token=env.CODEXBAR_RT | .tokens.id_token=env.CODEXBAR_IDT | .last_refresh=$lr' \
+           <<< "$creds" > "$tmp" && mv "$tmp" "$CREDS" || rm -f "$tmp"
         rm -f "$CACHE_DIR/.last_error"
     else
         auth_ok=false
@@ -1392,7 +1475,7 @@ if [[ "$JSON_MODE" == "true" ]]; then
     _last_error_json=null
     if [[ -f "$CACHE_DIR/.last_error" ]]; then
         _le_code="" _le_msg=""
-        { read -r _le_code || true; read -r _le_msg || true; } < "$CACHE_DIR/.last_error" 2>/dev/null || true
+        { read -r _le_code || true; read -r _le_msg || true; } < <(read_bounded "$CACHE_DIR/.last_error" "$FILE_MAX_SECRET") 2>/dev/null || true
         if [[ -n "$_le_code" && "$_le_code" =~ ^[0-9]+$ && "$_le_code" != "000" ]]; then
             _last_error_json=$(jq -nc --argjson c "$_le_code" --arg m "$_le_msg" \
                 '{http_status:$c, message:$m}')
@@ -1699,7 +1782,7 @@ else
     # API error info (if stale)
     if [[ -f "$CACHE_DIR/.last_error" ]]; then
         _le_code="" _le_msg=""
-        { read -r _le_code || true; read -r _le_msg || true; } < "$CACHE_DIR/.last_error" 2>/dev/null || true
+        { read -r _le_code || true; read -r _le_msg || true; } < <(read_bounded "$CACHE_DIR/.last_error" "$FILE_MAX_SECRET") 2>/dev/null || true
         if [[ -n "$_le_code" ]] && [[ "$_le_code" =~ ^[0-9]+$ ]] && [[ "$_le_code" != "000" ]]; then
             _le_msg=$(sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<< "$_le_msg")
             if (( _le_code >= 500 )); then

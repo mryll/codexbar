@@ -113,4 +113,55 @@ _plan=$(jq -r .plan <<<"$OUT")
     && _ok "json keeps the plan raw (no HTML entities)" \
     || _no "json keeps the plan raw (no HTML entities)" "got: $_plan"
 
+# --- A newline in a credential must not become a curl option -----------------
+# curl parses a --config stream one option per LINE, and feeding it on stdin
+# does not change that. A credential carrying a real newline ends its own value
+# and turns the rest into fresh directives: "url = https://..." plus "insecure"
+# makes curl run a SECOND transfer with the Authorization header attached.
+# --proto '=https' does not stop it — the injected URL is https as well — so
+# cfg_escape is the only defence, and this is the test that holds it in place.
+_inj_home=$(mktemp -d) || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+mkdir -p "$_inj_home/.codex" "$_inj_home/.cache/codexbar" "$_inj_home/bin" "$_inj_home/spy"
+# A curl that records exactly what it was handed — argv and the config stream —
+# then answers with a usable payload so the script runs to completion.
+cat > "$_inj_home/bin/curl" <<'CURLSPY'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$SPYDIR/argv"
+cat > "$SPYDIR/stdin"
+printf '%s\n200' "$SPYUSAGE"
+CURLSPY
+chmod +x "$_inj_home/bin/curl"
+_inj_hdr=$(printf '{"alg":"RS256"}' | _b64url)
+_inj_acc=$(printf '{"exp":4102444800}' | _b64url)          # year 2100 -> no refresh
+_inj_idt=$(printf '{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}' | _b64url)
+# The hostile value rides in account_id: it reaches the config verbatim, without
+# having to survive JWT decoding on the way there.
+jq -nc --arg at "$_inj_hdr.$_inj_acc.sig" --arg idt "$_inj_hdr.$_inj_idt.sig" \
+    '{tokens:{access_token:$at,refresh_token:"r",id_token:$idt,
+              account_id:"B\nurl = https://127.0.0.1:9/stolen\ninsecure"}}' \
+    > "$_inj_home/.codex/auth.json" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+_inj_usage=$(printf "$base" 46 '')
+OUT=$(SPYDIR="$_inj_home/spy" SPYUSAGE="$_inj_usage" HOME="$_inj_home" \
+      XDG_STATE_HOME="$_inj_home/.local/state" XDG_CACHE_HOME="$_inj_home/.cache" \
+      PATH="$_inj_home/bin:$PATH" "$SCRIPT"); RC=$?
+assert_exit0      "credential with a newline: exit 0"
+assert_json_valid "credential with a newline: valid JSON"
+
+_inj_cfg=$(cat "$_inj_home/spy/stdin" 2>/dev/null || true)
+_inj_bad=$(command grep -nE '^[[:space:]]*(url|insecure|proto|output|upload-file)\b' <<<"$_inj_cfg" | head -1 || true)
+[[ -z "$_inj_bad" ]] \
+    && _ok "no injected directive reaches curl" \
+    || _no "no injected directive reaches curl" "line: $_inj_bad"
+# Negative control: the hostile value DID travel through cfg_escape and came out
+# flattened into its own header. Without this, an assertion that passed only
+# because the value never arrived would look like a working defence.
+command grep -qF 'chatgpt-account-id: Burl = https://127.0.0.1:9/stoleninsecure' <<<"$_inj_cfg" \
+    && _ok "the hostile value is flattened into the header it belongs to" \
+    || _no "the hostile value is flattened into the header it belongs to" "config was: $_inj_cfg"
+# And the whole point of the stdin channel: nothing secret on the command line.
+command grep -qiF 'bearer' "$_inj_home/spy/argv" \
+    && _no "no bearer token on curl argv" "argv carries the header" \
+    || _ok "no bearer token on curl argv"
+rm -rf "$_inj_home"
+
 finish

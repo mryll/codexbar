@@ -522,15 +522,21 @@ Panel {
 
   function finalizeRun() {
     var text = capturedText.trim()
-    if (text === "")
+    if (text === "") {
       // The install hint lives HERE and not in the core, which is where every
       // other message of this family lives. The one message the core cannot
-      // emit is the one about its own absence.
-      setError(binName + " produced no output — not installed or not on PATH?\n\n"
-               + "Install it with:  yay -S codexbar\n"
-               + "Then open this panel again.")
-    else
+      // emit is the one about its own absence. But it is only true when
+      // nothing else already explained the emptiness: the StdioCollector
+      // tripwire also leaves capturedText empty, and there "not installed" is
+      // a lie — the binary answered, it answered too much — so it would send
+      // the reader off to install what they already have.
+      if (root.errorMessage === "")
+        setError(binName + " produced no output — not installed or not on PATH?\n\n"
+                 + "Install it with:  yay -S codexbar\n"
+                 + "Then open this panel again.")
+    } else {
       handle(text)
+    }
     if (pendingCmd) { var c = pendingCmd; pendingCmd = null; Qt.callLater(function() { root.startRun(c) }) }
   }
 
@@ -598,8 +604,21 @@ Panel {
     }
     stdout: StdioCollector {
       waitForEnd: true
+      // A tripwire, not a limit. StdioCollector has already buffered the whole
+      // stream by the time this runs, so this cannot cap the peak memory — the
+      // real bound is in the CLI, which reads every file and every response
+      // under a byte cap of its own. What this does is refuse to RETAIN an
+      // answer that is far outside anything the CLI can legitimately produce,
+      // and say so, instead of parsing megabytes of unknown text into the
+      // long-lived shell process.
+      readonly property int maxBytes: 1024 * 1024
       onStreamFinished: {
-        root.capturedText = text
+        if (text.length > maxBytes) {
+          root.capturedText = ""
+          root.setError(root.binName + " returned more than " + (maxBytes / 1024) + " KiB — refusing it")
+        } else {
+          root.capturedText = text
+        }
         root.collectorDone = true
         root.maybeFinalize()
       }
