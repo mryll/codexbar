@@ -164,4 +164,119 @@ command grep -qiF 'bearer' "$_inj_home/spy/argv" \
     || _ok "no bearer token on curl argv"
 rm -rf "$_inj_home"
 
+# --- curl reads ~/.curlrc BEFORE our --config stream --------------------------
+# Everything cfg_escape defends is bypassable without -q: the attacker who can
+# write $HOME/.curlrc does not need to inject a newline at all, they just put
+# the directive in the file curl reads first. These run against the real curl on
+# this machine and stay offline (file:// URL, no server, no DNS): the point is
+# to prove the mechanism the -q in codexbar is there for, not to trust a claim.
+_cq=$(mktemp -d) || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+printf 'data' > "$_cq/src.txt"
+printf 'output = "%s/pwned.txt"\n' "$_cq" > "$_cq/.curlrc"
+
+HOME="$_cq" command curl -s "file://$_cq/src.txt" >/dev/null 2>&1 || true
+[[ -f "$_cq/pwned.txt" ]] \
+    && _ok "without -q a hostile ~/.curlrc hijacks the transfer" \
+    || _no "without -q a hostile ~/.curlrc hijacks the transfer" "curlrc was ignored — this machine's curl does not read it, the assertion below proves nothing"
+rm -f "$_cq/pwned.txt"
+
+_cq_out=$(HOME="$_cq" command curl -q -s "file://$_cq/src.txt" 2>/dev/null || true)
+[[ ! -f "$_cq/pwned.txt" && "$_cq_out" == "data" ]] \
+    && _ok "-q suppresses ~/.curlrc and the answer comes back on stdout" \
+    || _no "-q suppresses ~/.curlrc and the answer comes back on stdout" "pwned=$( [[ -f "$_cq/pwned.txt" ]] && echo yes || echo no ) out=$_cq_out"
+rm -f "$_cq/pwned.txt"
+
+# POSITION control: -q after another option is already too late — curl has read
+# the file by then. This is why the script writes `curl -q "${args[@]}"` and not
+# a -q buried in the array.
+HOME="$_cq" command curl -s -q "file://$_cq/src.txt" >/dev/null 2>&1 || true
+[[ -f "$_cq/pwned.txt" ]] \
+    && _ok "-q placed after another option does NOT suppress the file" \
+    || _no "-q placed after another option does NOT suppress the file" "position turned out not to matter"
+rm -f "$_cq/pwned.txt"
+
+# And -q must not have closed the channel the script actually uses: the same
+# directive on --config - is still honoured with -q in front.
+printf 'output = "%s/pwned.txt"\n' "$_cq" \
+    | HOME="$_cq" command curl -q -s --config - "file://$_cq/src.txt" >/dev/null 2>&1 || true
+[[ -f "$_cq/pwned.txt" ]] \
+    && _ok "-q leaves our own --config stream working" \
+    || _no "-q leaves our own --config stream working" "--config - stopped being honoured"
+rm -rf "$_cq"
+
+# --- read_bounded must not block on a FIFO, even after losing the race --------
+# The [[ -f ]] pre-check rejects a FIFO that is already there, so planting one
+# and running the script would go green whatever the open does — it never gets
+# that far. The race is exactly the window AFTER that check, so the property to
+# test is the open itself: take the real helper out of the script, drop the
+# pre-check (that simulates losing the race), and point it at a real FIFO.
+_rb=$(mktemp -d) || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+sed -n '/^read_bounded() {/,/^}/p' "$SCRIPT" | command grep -v '\[\[ -f "\$1" \]\]' > "$_rb/rb.sh"
+# Guard against a silently empty extraction (a rename would make every
+# assertion below vacuously true).
+command grep -q 'read_bounded()' "$_rb/rb.sh" \
+    && _ok "read_bounded was extracted from the script" \
+    || _no "read_bounded was extracted from the script" "sed found nothing — the assertions below are vacuous"
+
+mkfifo "$_rb/pipe"
+timeout 5 bash -c 'source "$1/rb.sh"; read_bounded "$1/pipe" 1024' _ "$_rb" >/dev/null 2>&1
+_rb_rc=$?
+[[ "$_rb_rc" -ne 124 ]] \
+    && _ok "read_bounded returns on a FIFO instead of hanging" \
+    || _no "read_bounded returns on a FIFO instead of hanging" "timed out (rc=124) — the open blocks"
+
+# The non-blocking open must not have cost us the reads it exists for: a regular
+# file still comes back whole, and still stops at the cap.
+printf 'hello world' > "$_rb/small"
+_rb_small=$(timeout 5 bash -c 'source "$1/rb.sh"; read_bounded "$1/small" 65536' _ "$_rb" 2>/dev/null || true)
+[[ "$_rb_small" == "hello world" ]] \
+    && _ok "read_bounded still returns a whole small file" \
+    || _no "read_bounded still returns a whole small file" "got: $_rb_small"
+
+head -c 100000 /dev/zero | tr '\0' 'x' > "$_rb/big"
+_rb_n=$(timeout 5 bash -c 'source "$1/rb.sh"; read_bounded "$1/big" 65536' _ "$_rb" 2>/dev/null | LC_ALL=C wc -c)
+[[ "$_rb_n" -eq 65536 ]] \
+    && _ok "read_bounded still stops at exactly MAXBYTES" \
+    || _no "read_bounded still stops at exactly MAXBYTES" "read $_rb_n bytes, want 65536"
+rm -rf "$_rb"
+
+# --- The cache lock is opened O_RDWR, so a swapped-in FIFO cannot freeze it ---
+# Same shape of race as read_bounded: the [[ -f ]] pre-check rejects a FIFO that
+# is already there, so an end-to-end plant proves nothing about the open. What
+# the fix changes is the redirect itself, so that is what gets measured here —
+# the primitive, on this machine — plus a check that the script uses it.
+# Linux defines an O_RDWR open on a FIFO as non-blocking; POSIX leaves it
+# undefined, and this script is Linux-only.
+_lk=$(mktemp -d) || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+mkfifo "$_lk/f"
+timeout 5 bash -c 'exec 9>"$1/f"' _ "$_lk" >/dev/null 2>&1; _lk_w=$?
+[[ "$_lk_w" -eq 124 ]] \
+    && _ok "a write-only open on a FIFO hangs (the bug being closed)" \
+    || _no "a write-only open on a FIFO hangs (the bug being closed)" "rc=$_lk_w — the assertion below proves nothing"
+timeout 5 bash -c 'exec 9<>"$1/f"; flock -n 9' _ "$_lk" >/dev/null 2>&1; _lk_rw=$?
+[[ "$_lk_rw" -eq 0 ]] \
+    && _ok "an O_RDWR open returns at once and still takes the lock" \
+    || _no "an O_RDWR open returns at once and still takes the lock" "rc=$_lk_rw"
+rm -rf "$_lk"
+command grep -qF 'exec 9<>"$_lockfile"' "$SCRIPT" \
+    && _ok "the script opens the cache lock with <>" \
+    || _no "the script opens the cache lock with <>" "the lock redirect is not O_RDWR"
+
+# --- The panel's tripwire must not claim bytes it does not measure ------------
+# QML's String.length counts UTF-16 units, so a cap named maxBytes over-retains
+# by up to 3x and the number in the message is a lie. The whole substance of
+# that fix is the name, so the name is what gets asserted: qmllint cannot guard
+# it (a dangling reference is only an [unqualified] warning, and this project
+# carries 81 of those because the qs.* imports do not resolve outside the shell).
+_qml="$(dirname "$SCRIPT")/omarchy/Panel.qml"
+command grep -qF 'maxChars' "$_qml" \
+    && _ok "the panel tripwire is named for the units it counts" \
+    || _no "the panel tripwire is named for the units it counts" "maxChars not found in $_qml"
+command grep -qF 'maxBytes' "$_qml" \
+    && _no "no byte claim survives in the panel tripwire" "maxBytes is still there" \
+    || _ok "no byte claim survives in the panel tripwire"
+command grep -qF 'KiB — refusing it' "$_qml" \
+    && _no "the refusal message stopped claiming KiB" "the message still says KiB" \
+    || _ok "the refusal message stopped claiming KiB"
+
 finish

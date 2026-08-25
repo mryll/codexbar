@@ -51,7 +51,13 @@ _run_transient() {
     # XDG dirs pinned inside the fake HOME: theme parsing needs no jq and no
     # network, so an ambient XDG_STATE_HOME would pull in the developer's real
     # Omarchy theme and make these runs machine-dependent.
-    OUT=$(HOME="$THOME" XDG_STATE_HOME="$THOME/.local/state" XDG_CACHE_HOME="$THOME/.cache" PATH="$THOME/bin:$PATH" "$SCRIPT"); RC=$?
+    # PRE_RUN lets a caller plant something in the fake HOME after it is built
+    # and before the script sees it (the FIFO tests). RUN_TIMEOUT wraps the run
+    # so a blocking open fails its assertion instead of wedging the suite.
+    [[ -n "${PRE_RUN:-}" ]] && eval "$PRE_RUN"
+    local -a _to=()
+    [[ -n "${RUN_TIMEOUT:-}" ]] && _to=(timeout "$RUN_TIMEOUT")
+    OUT=$(HOME="$THOME" XDG_STATE_HOME="$THOME/.local/state" XDG_CACHE_HOME="$THOME/.cache" PATH="$THOME/bin:$PATH" "${_to[@]}" "$SCRIPT"); RC=$?
     return 0
 }
 
@@ -176,6 +182,64 @@ assert_tip_has     "hard refresh: tooltip shows HTTP code" "HTTP 400"
 grep -q "invalid_grant" "$THOME/.cache/codexbar/.last_error" 2>/dev/null \
     && _ok "hard refresh: .last_error carries provider message" \
     || _no "hard refresh: .last_error carries provider message" "$(cat "$THOME/.cache/codexbar/.last_error" 2>/dev/null || echo missing)"
+rm -rf "$THOME"
+
+# --- Every curl the script runs gets -q as its FIRST argument -----------------
+# curl reads ~/.curlrc before the --config stream that carries the credentials,
+# so without -q an attacker who can write that file redirects the token however
+# they like and the escaping never sees it. -q anywhere but first is too late
+# (test_hardening measures that against the real curl). An expired token drives
+# BOTH network calls — the refresh and the usage fetch — so this covers both.
+QSPY_STUB='#!/usr/bin/env bash
+printf "%s\n" "$1" >> "$HOME/.qargs"
+cnt="$HOME/.curl_count"
+n=$(( $(cat "$cnt" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$cnt"
+if [[ "$n" == 1 ]]; then
+    printf "%s\n200" "{\"access_token\":\"h.p.s\",\"refresh_token\":\"r2\",\"id_token\":\"h.p.s\"}"
+else
+    printf "%s\n200" "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":42,\"reset_at\":9999999999,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":10,\"reset_at\":9999999999,\"limit_window_seconds\":604800}}}"
+fi
+'
+_run_transient "$QSPY_STUB" old "" expired
+assert_exit0 "curl -q run: exit 0"
+_q_calls=$(curl_calls)
+[[ "$_q_calls" -ge 2 ]] \
+    && _ok "curl -q run: both the refresh and the fetch fired (calls=$_q_calls)" \
+    || _no "curl -q run: both the refresh and the fetch fired" "only $_q_calls call(s) — one of the two paths is untested"
+_q_first=$(sort -u "$THOME/.qargs" 2>/dev/null | tr '\n' ',' || true)
+[[ "$_q_first" == "-q," ]] \
+    && _ok "every curl invocation starts with -q" \
+    || _no "every curl invocation starts with -q" "first args seen: ${_q_first:-none}"
+rm -rf "$THOME"
+
+# --- A FIFO planted at .last_error must not freeze the widget -----------------
+# The error path is the one a hostile server can trigger at will, and the path
+# is predictable, so this is a write the attacker gets to aim. `> "$file"`
+# blocks for ever on a FIFO; mktemp+rename never opens the destination at all.
+# Guarded by RUN_TIMEOUT: a regression shows up as a red assertion, not a hung
+# suite.
+PRE_RUN='mkfifo "$THOME/.cache/codexbar/.last_error"' RUN_TIMEOUT=20 \
+    _run_transient "$HARD_STUB" old
+unset PRE_RUN RUN_TIMEOUT
+[[ "$RC" -ne 124 ]] \
+    && _ok "FIFO at .last_error: the run finishes instead of hanging" \
+    || _no "FIFO at .last_error: the run finishes instead of hanging" "timed out (rc=124) — the write blocks"
+assert_exit0      "FIFO at .last_error: exit 0"
+assert_json_valid "FIFO at .last_error: valid JSON"
+assert_text_has   "FIFO at .last_error: still shows cached pct" "42%"
+[[ -f "$THOME/.cache/codexbar/.last_error" ]] \
+    && _ok "FIFO at .last_error: replaced by a regular file" \
+    || _no "FIFO at .last_error: replaced by a regular file" "still not a regular file"
+# Read it only once it is known to be a regular file: a FIFO still sitting
+# there blocks `grep` exactly as it blocked the widget, and a hung assertion
+# reports nothing. This is the assertion that has to survive a regression.
+_le_seen="(not a regular file)"
+[[ -f "$THOME/.cache/codexbar/.last_error" ]] \
+    && _le_seen=$(LC_ALL=C head -c 64 "$THOME/.cache/codexbar/.last_error" 2>/dev/null || true)
+[[ "$_le_seen" == 500* ]] \
+    && _ok "FIFO at .last_error: the real error was recorded" \
+    || _no "FIFO at .last_error: the real error was recorded" "content: $_le_seen"
 rm -rf "$THOME"
 
 finish

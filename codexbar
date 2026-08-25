@@ -316,16 +316,40 @@ FILE_MAX_SECRET=$((64 * 1024))
 # Responses are a few KiB; 2 MiB is far past anything the API can mean.
 HTTP_MAX_BYTES=$((2 * 1024 * 1024))
 
+# A FIFO blocks in open(2), not in read(2), so testing the path and then opening
+# it is a race: between the two someone replaces the file. `head` opens without
+# O_NONBLOCK and hangs anyway. `dd iflag=nonblock` is the one open in coreutils
+# that does not block, and on a regular file it changes nothing. The [[ -f ]]
+# stays because it rejects the common case cheaply; iflag=nonblock is what
+# closes the race. bs=MAXBYTES count=1 is the bound: one read, never more.
 read_bounded() {  # read_bounded PATH MAXBYTES
-    # -f is false for a FIFO, a socket, a directory and a device, so the FIFO
-    # never gets opened; head -c bounds what a regular file can cost us.
     [[ -f "$1" ]] || return 1
-    LC_ALL=C head -c "$2" -- "$1"
+    LC_ALL=C dd if="$1" iflag=nonblock bs="$2" count=1 status=none 2>/dev/null
 }
 
 # `${#var}` counts CHARACTERS under a UTF-8 locale, which under-counts a byte
 # budget; wc -c is the byte truth whatever the locale.
 byte_len() { LC_ALL=C printf '%s' "$1" | LC_ALL=C wc -c; }
+
+# --- .last_error is written through a fresh file, never opened in place ------
+# open(2) for WRITE blocks on a FIFO exactly as the read side does, and this
+# path is predictable: a FIFO planted at $CACHE_DIR/.last_error would freeze the
+# widget on the error path, which is the path a hostile server can trigger at
+# will. Checking the path first would only move the race, so nothing here ever
+# opens the destination: mktemp creates a brand-new regular file with O_EXCL,
+# and rename(2) replaces whatever sits there without opening it. That closes
+# the hang and the TOCTOU in one move.
+# Best effort throughout — a read-only cache dir must never abort the widget,
+# and a bare `> "$CACHE_DIR/.last_error"` under `set -e` did exactly that: a
+# failed open exits the script with no JSON on stdout, breaking the contract.
+write_last_error() {  # write_last_error HTTP_CODE MESSAGE
+    local tmp
+    tmp=$(mktemp "$CACHE_DIR/.last_error.XXXXXX" 2>/dev/null) || return 0
+    printf '%s\n%s' "$1" "$2" > "$tmp" 2>/dev/null \
+        && mv "$tmp" "$CACHE_DIR/.last_error" 2>/dev/null \
+        || rm -f "$tmp" 2>/dev/null || true
+    return 0
+}
 
 # --- Credentials reach curl through stdin ------------------------------------
 # Every argument of a running process is world-readable through
@@ -988,7 +1012,12 @@ _fetch_usage() {
     _fetch_args=(-s --max-time 10 --max-filesize "$HTTP_MAX_BYTES" --proto '=https'
                  --config - -w $'\n%{http_code}' "$API_URL")
     while :; do
-        _resp_body=$(printf '%s\n' "$_fetch_cfg" | curl "${_fetch_args[@]}") || true
+        # -q FIRST, before anything else: curl reads ~/.curlrc BEFORE the
+        # --config stream we hand it, so without -q the whole escape above is
+        # bypassable — the same attacker who could plant a FIFO in the cache dir
+        # writes `url = …` or `insecure` there and the token leaves with them.
+        # -q placed after another option is already too late (measured).
+        _resp_body=$(printf '%s\n' "$_fetch_cfg" | curl -q "${_fetch_args[@]}") || true
         _http_code="${_resp_body##*$'\n'}"
         _resp_body="${_resp_body%$'\n'"$_http_code"}"
         # Normalize bogus codes (e.g. raw body without curl write-out suffix) to 000.
@@ -1026,7 +1055,7 @@ _fetch_usage() {
         touch "$stale_marker"
         if [[ "$_http_code" =~ ^[45][0-9]{2}$ ]]; then
             _err_msg=$(jq -r '.error.message // empty' <<< "$_resp_body" 2>/dev/null) || true
-            printf '%s\n%s' "$_http_code" "$_err_msg" > "$CACHE_DIR/.last_error"
+            write_last_error "$_http_code" "$_err_msg"
         fi
     else
         die "API request failed.\nCheck your connection."
@@ -1043,8 +1072,17 @@ _fetch_usage() {
 # for a reader that never comes — and this redirect is the first thing every run
 # does, so a FIFO planted here freezes omarchy-shell before anything is drawn.
 # The path is predictable, so demand a regular file (or nothing yet) first.
+#
+# That check alone is a race: `9>` still opens whatever the path names by the
+# time it runs. `<>` is the fix, not a style choice. Linux defines opening a
+# FIFO O_RDWR as non-blocking (POSIX leaves it undefined, and this script is
+# Linux-only), so the open returns whatever an attacker swaps in, and flock
+# works the same on the descriptor. `<>` also does not truncate, which the lock
+# file — empty by construction — never needed. Residue: a character device in
+# that spot could still block on open, but planting one needs CAP_MKNOD, which
+# is outside what the same-user attacker of this threat model has.
 [[ ! -e "$_lockfile" || -f "$_lockfile" ]] || die "Cache lock is not a regular file.\n$_lockfile"
-{ exec 9>"$_lockfile"; } 2>/dev/null || die "Cannot open cache lock.\n$_lockfile is not writable."
+{ exec 9<>"$_lockfile"; } 2>/dev/null || die "Cannot open cache lock.\n$_lockfile is not writable."
 # Generous wait: a boot-like sibling may hold the lock for the long budget plus
 # in-flight curls (worst ≈ NET_LONG_BUDGET + 25s refresh + 10s fetch ≈ 57s);
 # rendering late beats dying with a visible "Cache lock timeout".
@@ -1112,7 +1150,9 @@ if (( expires_s < now_s + REFRESH_BUFFER )); then
                    -w '\n%{http_code}' -X POST "$TOKEN_URL"
                    -H "Content-Type: application/json" --data @-)
     while :; do
-        refresh_raw=$(printf '%s' "$refresh_body" | curl "${_refresh_args[@]}") || true
+        # -q first for the same reason as the usage fetch: a hostile ~/.curlrc
+        # would otherwise redirect the refresh token to an attacker's URL.
+        refresh_raw=$(printf '%s' "$refresh_body" | curl -q "${_refresh_args[@]}") || true
         refresh_code="${refresh_raw##*$'\n'}"
         resp="${refresh_raw%$'\n'"$refresh_code"}"
         # Normalize bogus codes (e.g. raw body without curl write-out suffix) to 000.
@@ -1170,16 +1210,7 @@ if (( expires_s < now_s + REFRESH_BUFFER )); then
             else
                 refresh_err="Invalid refresh response"
             fi
-            # Best-effort write — never abort the widget if the cache dir is unwriteable.
-            _le_tmp=$(mktemp "$CACHE_DIR/.last_error.XXXXXX" 2>/dev/null) || _le_tmp=""
-            if [[ -n "$_le_tmp" ]]; then
-                if printf '%s\n%s' "$refresh_code" "$refresh_err" > "$_le_tmp" 2>/dev/null \
-                   && mv "$_le_tmp" "$CACHE_DIR/.last_error" 2>/dev/null; then
-                    :
-                else
-                    rm -f "$_le_tmp" 2>/dev/null || true
-                fi
-            fi
+            write_last_error "$refresh_code" "$refresh_err"
         fi
     fi
 fi

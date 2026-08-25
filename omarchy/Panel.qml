@@ -604,18 +604,17 @@ Panel {
     }
     stdout: StdioCollector {
       waitForEnd: true
-      // A tripwire, not a limit. StdioCollector has already buffered the whole
-      // stream by the time this runs, so this cannot cap the peak memory — the
-      // real bound is in the CLI, which reads every file and every response
-      // under a byte cap of its own. What this does is refuse to RETAIN an
-      // answer that is far outside anything the CLI can legitimately produce,
-      // and say so, instead of parsing megabytes of unknown text into the
-      // long-lived shell process.
-      readonly property int maxBytes: 1024 * 1024
+      // A tripwire, not a limit, and it counts UTF-16 units rather than bytes —
+      // QML's String.length has no byte view. A megabyte of units is up to
+      // three megabytes of UTF-8, which is still far outside anything the CLI
+      // can produce now that every file and every response it reads is capped.
+      // The real bound is there; this only refuses to RETAIN an answer that
+      // could not have come from a healthy run.
+      readonly property int maxChars: 1024 * 1024
       onStreamFinished: {
-        if (text.length > maxBytes) {
+        if (text.length > maxChars) {
           root.capturedText = ""
-          root.setError(root.binName + " returned more than " + (maxBytes / 1024) + " KiB — refusing it")
+          root.setError(root.binName + " returned more than " + (maxChars / 1024) + "K characters — refusing it")
         } else {
           root.capturedText = text
         }
