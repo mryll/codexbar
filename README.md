@@ -167,6 +167,22 @@ The plugin gives you a real user interface instead of a text tooltip. The bar sh
 
 Install the plugin. Then add the plugin to your bar:
 
+### Install the plugin
+
+From the marketplace, or from this repository directly:
+
+```bash
+omarchy plugin add https://github.com/mryll/codexbar.git --enable
+```
+
+That clones the repository into `~/.config/omarchy/plugins/mryll.codexbar` and
+validates the manifest before it is enabled. To remove it later:
+`omarchy plugin remove mryll.codexbar`.
+
+The plugin runs the `codexbar` CLI from your PATH, so install that too — from the AUR (`yay -S codexbar`) or with `make install PREFIX=~/.local`.
+
+For development, link the working copy instead of cloning a second one:
+
 ```bash
 make install PREFIX=~/.local   # if codexbar is not installed yet
 make install-omarchy
