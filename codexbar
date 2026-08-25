@@ -951,7 +951,10 @@ jwt_decode() {
 jwt_exp() { jwt_decode "$1" | jq -r '((.exp | numbers) // 0) | floor | if (. > 1e12 or . < 0) then 0 else . end'; }
 
 # --- Pre-checks ---
-for cmd in curl jq date base64; do
+# dd belongs here: read_bounded uses it for the only open(2) in coreutils that
+# does not block on a FIFO, so a missing dd is a missing guard, not a missing
+# convenience.
+for cmd in curl jq date base64 dd; do
     command -v "$cmd" &>/dev/null || die "Missing dependency: $cmd"
 done
 [[ -f "$CREDS" ]] || die "No credentials.\nRun <b>codex login</b> to log in."
