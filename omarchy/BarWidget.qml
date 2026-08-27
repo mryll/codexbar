@@ -12,6 +12,20 @@ BarWidget {
 
   readonly property var panelItem: panelLoader.item
 
+  // The plugin clone carries the script at its root. This file knows the
+  // clone's path (Qt.resolvedUrl is relative to it). The panel uses this
+  // path only when the PATH command cannot start. Empty = no fallback.
+  readonly property string bundledCmd: urlToPath(Qt.resolvedUrl("../codexbar"))
+
+  // Decode each segment: the mirror of Util.fileUrl's encoding. A plain
+  // scheme strip keeps the encoding and gives a path that does not exist.
+  function urlToPath(u) {
+    var s = String(u)
+    if (s.indexOf("file://") !== 0) return ""
+    try { return s.substring(7).split("/").map(decodeURIComponent).join("/") }
+    catch (e) { return "" }
+  }
+
   function injectPanel() {
     var target = panelLoader.item
     if (!target) return
@@ -19,6 +33,7 @@ BarWidget {
     if ("settings" in target) target.settings = root.settings
     if ("anchorItem" in target) target.anchorItem = button
     if ("hostWidget" in target) target.hostWidget = root
+    if ("bundledCmd" in target) target.bundledCmd = root.bundledCmd
   }
 
   // Two names because they mean different things: refresh() honours the read
