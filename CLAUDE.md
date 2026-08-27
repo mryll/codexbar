@@ -19,3 +19,10 @@
 - Concurrent instances are serialized with `flock` (multi-monitor support)
 - Color chain (first match wins): `--color-*` flags > Omarchy theme (`~/.local/state/omarchy/current/theme/colors.toml`, legacy `~/.config/...`) > pywal (`${XDG_CACHE_HOME:-$HOME/.cache}/wal/colors.json`) > One Dark built-ins. Every step degrades silently; the resolved anchors are published as `palette` in `--json` so the Quickshell panel draws the same gauge
 - `IFS=$'\t' read` collapses runs of empty fields (TAB is IFS whitespace) — emit a sentinel from `jq`, never an empty TSV field
+
+## Release
+
+1. Commit `chore: release X.Y.Z` on `develop` bumping the `manifest.json` version (the script carries no version string; the tag and the manifest ARE the version), push.
+2. Move master to the release — master only advances here: `git push origin develop:master`. Then `git tag vX.Y.Z && git push origin --tags`.
+3. `gh release create vX.Y.Z` (bash widget: source-only release, nothing to build).
+4. Only then bump the AUR package (`codexbar`) per the workspace `AGENTS.md` (`~/Work/personal/AGENTS.md`).
