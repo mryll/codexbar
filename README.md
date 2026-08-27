@@ -124,7 +124,7 @@ The bar shows your session use and the time until the reset. Put the pointer on 
 | `--pace-tolerance N` | Sets the difference from the pace that is still "on pace". Default: `5` |
 | `--format-pace-color` | Gives the pace indicator its own color in the bar |
 | `--tooltip-pace-pts` | Uses point-based pace in the tooltip, and adds a pace mark to each bar |
-| `--tooltip-font FONT` | Font family (or Pango family list) the tooltip is pinned to. Default: `JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace`. It must be monospace — see [Tooltip font](#tooltip-font) |
+| `--tooltip-font FONT` | Font family (or Pango family list) the tooltip is pinned to. Default: `JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace`. It must be monospace — see [Tooltip font](#tooltip-font) |
 | `--frame`, `--frame-font` | **DEPRECATED**, still accepted so an existing config keeps working. `--frame` drew a bordered card around the tooltip and is now a no-op; `--frame-font` is an alias for `--tooltip-font` |
 | `--color-low HEX` | Sets the color for 0–49% |
 | `--color-mid HEX` | Sets the color for 50–74% |
@@ -285,10 +285,10 @@ The tooltip is pinned to a monospace font. That is not decoration: its rules are
 The default is a **list** of families, tried in order:
 
 ```
-JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace
+JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace
 ```
 
-Pango falls through to the next name when one is not installed. This matters: the Arch package `ttf-jetbrains-mono-nerd` does **not** ship the `…Mono` family, so pinning that one name alone used to fall back to your system's proportional font without saying so.
+Pango falls through to the next name when one is not installed. Both families are fully monospaced — every glyph, icons included, advances 0.6 em — so the rules align the same with either. The difference is the drawn size of the icons: the `…Mono` family shrinks them to fit the cell, about 40% smaller. The non-Mono family draws them at full size, and for that reason it comes first. The Arch package `ttf-jetbrains-mono-nerd` ships both families; `ttf-jetbrains-mono-nerd-basic` — the one Omarchy installs — ships only the non-Mono one.
 
 To use a different font, name any monospace family (or your own list):
 
