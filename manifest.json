@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mryll.codexbar",
   "name": "Codexbar",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "author": "mryll",
   "license": "MIT",
   "description": "OpenAI Codex subscription usage (codexbar) in the Omarchy bar: session, weekly, code-review and per-model limits with pacing.",
