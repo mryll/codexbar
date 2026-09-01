@@ -1138,7 +1138,23 @@ auth_ok=true
 refresh_failure_kind=""
 transient_stale=false
 
+# The write-back temp is staged BEFORE the POST, and beside its target. Both
+# halves matter. Same-directory: a bare mktemp lands in /tmp, which is a tmpfs
+# here — a different filesystem from ~/.codex — where `mv` degrades from
+# rename(2) to copy+unlink and an interruption can leave a torn auth.json.
+# Before the POST: a 200 from the token endpoint rotates the refresh token,
+# so a refresh whose result cannot be persisted must not run at all —
+# skipping it leaves the stored tokens untouched for the next run to retry.
+cred_tmp=""
 if (( expires_s < now_s + REFRESH_BUFFER )); then
+    cred_tmp=$(mktemp "${CREDS%/*}/.auth.XXXXXX" 2>/dev/null) || cred_tmp=""
+    if [[ -z "$cred_tmp" ]]; then
+        auth_ok=false
+        refresh_failure_kind="transient"
+    fi
+fi
+
+if [[ -n "$cred_tmp" ]]; then
     # Synchronous refresh — 25s timeout covers cold boot when DHCP is still settling.
     # Transient failures (no HTTP response) are retried until the shared deadline —
     # same policy as the usage fetch — so a cold-boot race doesn't cost a full interval.
@@ -1175,22 +1191,35 @@ if (( expires_s < now_s + REFRESH_BUFFER )); then
 
         [[ -n "$new_at" ]] && access_token="$new_at"
 
-        tmp=$(mktemp)
-        # Same argv rule for the three new token values. The input is the
-        # bounded copy already validated under this lock, not a fresh read of
-        # $CREDS: that bounds the read and shuts the window in which the file
-        # could be swapped for a FIFO between the check and the rewrite. A
-        # failed write leaves the old file alone — the in-memory token still
-        # serves this run, and exiting non-zero would break the widget.
-        CODEXBAR_AT="${new_at:-$access_token}" \
-        CODEXBAR_RT="${new_rt:-$refresh_token}" \
-        CODEXBAR_IDT="${new_idt:-$id_token_raw}" \
-        jq --arg lr "$now_iso" \
-           '.tokens.access_token=env.CODEXBAR_AT | .tokens.refresh_token=env.CODEXBAR_RT | .tokens.id_token=env.CODEXBAR_IDT | .last_refresh=$lr' \
-           <<< "$creds" > "$tmp" && mv "$tmp" "$CREDS" || rm -f "$tmp"
-        rm -f "$CACHE_DIR/.last_error"
+        # Re-read before replacing: the flock serializes codexbar instances,
+        # but NOT the codex CLI, and the POST above takes seconds. If the file
+        # changed under us (or the re-read comes back truncated), the CLI
+        # refreshed on its own — its tokens are the fresher ones, so ours are
+        # dropped instead of overwriting its write. Best-effort mitigation,
+        # not a CAS: the check-then-rename window is milliseconds.
+        current=$(read_bounded "$CREDS" "$FILE_MAX_SECRET") || current=""
+        if [[ "$current" == "$creds" ]] && (( $(byte_len "$current") < FILE_MAX_SECRET )); then
+            # Same argv rule for the three new token values. The jq input is
+            # the bounded copy already validated under this lock, not a fresh
+            # read of $CREDS: that bounds the read and shuts the window in
+            # which the file could be swapped for a FIFO between the check
+            # and the rewrite. A failed write leaves the old file alone — the
+            # in-memory token still serves this run, and exiting non-zero
+            # would break the widget.
+            CODEXBAR_AT="${new_at:-$access_token}" \
+            CODEXBAR_RT="${new_rt:-$refresh_token}" \
+            CODEXBAR_IDT="${new_idt:-$id_token_raw}" \
+            jq --arg lr "$now_iso" \
+               '.tokens.access_token=env.CODEXBAR_AT | .tokens.refresh_token=env.CODEXBAR_RT | .tokens.id_token=env.CODEXBAR_IDT | .last_refresh=$lr' \
+               <<< "$creds" > "$cred_tmp" && mv "$cred_tmp" "$CREDS" \
+               || rm -f "$cred_tmp" 2>/dev/null || true
+        else
+            rm -f "$cred_tmp" 2>/dev/null || true   # the CLI wrote mid-refresh: keep its write
+        fi
+        rm -f "$CACHE_DIR/.last_error" 2>/dev/null || true
     else
         auth_ok=false
+        rm -f "$cred_tmp" 2>/dev/null || true
         if [[ "$refresh_code" == "000" ]]; then
             # No HTTP response reached us — DHCP/DNS settling at boot, offline,
             # or actual timeout. Mark the episode so sibling instances skip

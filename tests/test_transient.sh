@@ -242,4 +242,94 @@ _le_seen="(not a regular file)"
     || _no "FIFO at .last_error: the real error was recorded" "content: $_le_seen"
 rm -rf "$THOME"
 
+# --- Credentials rewrite: staged beside the target, lands in the FILE, and ----
+# --- never tramples a concurrent CLI write ------------------------------------
+# The temp is created in ~/.codex (same filesystem as auth.json, so the mv is
+# rename(2), atomic) and BEFORE the POST (a 200 rotates the refresh token, so a
+# refresh whose result cannot be persisted must never run). The curl stub
+# observes the staging at POST time; the file is inspected afterwards.
+
+REWRITE_STUB='#!/usr/bin/env bash
+cnt="$HOME/.curl_count"
+n=$(( $(cat "$cnt" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$cnt"
+if [[ "$n" == 1 ]]; then
+    ls "$HOME/.codex/".auth.?????? >> "$HOME/.stage_log" 2>/dev/null
+    printf "%s\n200" "{\"access_token\":\"h.p.NEWAT\",\"refresh_token\":\"NEWRT\",\"id_token\":\"h.p.NEWIDT\"}"
+else
+    printf "%s\n200" "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":42,\"reset_at\":9999999999,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":10,\"reset_at\":9999999999,\"limit_window_seconds\":604800}}}"
+fi
+'
+_run_transient "$REWRITE_STUB" old "" expired
+assert_exit0 "rewrite: exit 0"
+[[ "$(jq -r '.tokens.access_token' "$THOME/.codex/auth.json")" == "h.p.NEWAT" ]] \
+    && _ok "rewrite: the new access token is in the FILE" \
+    || _no "rewrite: the new access token is in the FILE" "$(cat "$THOME/.codex/auth.json")"
+[[ "$(jq -r '.tokens.refresh_token' "$THOME/.codex/auth.json")" == "NEWRT" ]] \
+    && _ok "rewrite: the new refresh token is in the FILE" \
+    || _no "rewrite: the new refresh token is in the FILE" "$(cat "$THOME/.codex/auth.json")"
+grep -q . "$THOME/.stage_log" 2>/dev/null \
+    && _ok "staging: the temp sits beside the target during the POST" \
+    || _no "staging: the temp sits beside the target during the POST" "stage log empty"
+compgen -G "$THOME/.codex/.auth.??????" >/dev/null \
+    && _no "staging: no temp left behind" "$(ls -A "$THOME/.codex")" \
+    || _ok "staging: no temp left behind"
+rm -rf "$THOME"
+
+# mktemp failing for the credentials temp: the token endpoint is never called
+# (the refresh token is not consumed) and the stored file is byte-identical.
+# The contract holds in both output modes.
+ARGV_LOG_STUB='#!/usr/bin/env bash
+printf "%s " "$@" >> "$HOME/.cargs"; echo >> "$HOME/.cargs"
+cnt="$HOME/.curl_count"
+n=$(( $(cat "$cnt" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$cnt"
+printf "%s\n200" "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":42,\"reset_at\":9999999999,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":10,\"reset_at\":9999999999,\"limit_window_seconds\":604800}}}"
+'
+PRE_RUN='cat > "$THOME/bin/mktemp" <<"EOS"
+#!/usr/bin/env bash
+for a in "$@"; do [[ "$a" == *.auth.* ]] && exit 1; done
+exec /usr/bin/mktemp "$@"
+EOS
+chmod +x "$THOME/bin/mktemp"; cp "$THOME/.codex/auth.json" "$THOME/.auth_before"' \
+    _run_transient "$ARGV_LOG_STUB" old "" expired
+unset PRE_RUN
+assert_exit0      "mktemp fail: exit 0"
+assert_json_valid "mktemp fail: valid JSON"
+grep -q 'oauth/token' "$THOME/.cargs" 2>/dev/null \
+    && _no "mktemp fail: the token endpoint is never called" "argv: $(cat "$THOME/.cargs")" \
+    || _ok "mktemp fail: the token endpoint is never called"
+cmp -s "$THOME/.codex/auth.json" "$THOME/.auth_before" \
+    && _ok "mktemp fail: the stored credentials are untouched" \
+    || _no "mktemp fail: the stored credentials are untouched" "$(cat "$THOME/.codex/auth.json")"
+OUT=$(HOME="$THOME" XDG_STATE_HOME="$THOME/.local/state" XDG_CACHE_HOME="$THOME/.cache" \
+      PATH="$THOME/bin:$PATH" "$SCRIPT" --json); RC=$?
+assert_exit0      "mktemp fail --json: exit 0"
+assert_json_valid "mktemp fail --json: valid JSON"
+rm -rf "$THOME"
+
+# The CLI writes auth.json DURING the refresh POST: its write survives, ours
+# is dropped (compare-before-write; the flock covers codexbar instances only).
+CLI_CREDS='{"tokens":{"access_token":"h.p.CLIAT","refresh_token":"CLIRT","account_id":"a","id_token":"h.p.CLIIDT"}}'
+CONCURRENT_STUB='#!/usr/bin/env bash
+cnt="$HOME/.curl_count"
+n=$(( $(cat "$cnt" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$cnt"
+if [[ "$n" == 1 ]]; then
+    printf "%s" '"'"'{"tokens":{"access_token":"h.p.CLIAT","refresh_token":"CLIRT","account_id":"a","id_token":"h.p.CLIIDT"}}'"'"' > "$HOME/.codex/auth.json"
+    printf "%s\n200" "{\"access_token\":\"h.p.NEWAT\",\"refresh_token\":\"NEWRT\",\"id_token\":\"h.p.NEWIDT\"}"
+else
+    printf "%s\n200" "{\"plan_type\":\"plus\",\"rate_limit\":{\"primary_window\":{\"used_percent\":42,\"reset_at\":9999999999,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":10,\"reset_at\":9999999999,\"limit_window_seconds\":604800}}}"
+fi
+'
+_run_transient "$CONCURRENT_STUB" old "" expired
+assert_exit0 "concurrent write: exit 0"
+[[ "$(cat "$THOME/.codex/auth.json")" == "$CLI_CREDS" ]] \
+    && _ok "concurrent write: the CLI's write survives" \
+    || _no "concurrent write: the CLI's write survives" "$(cat "$THOME/.codex/auth.json")"
+compgen -G "$THOME/.codex/.auth.??????" >/dev/null \
+    && _no "concurrent write: no temp left behind" "$(ls -A "$THOME/.codex")" \
+    || _ok "concurrent write: no temp left behind"
+rm -rf "$THOME"
+
 finish
