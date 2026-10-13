@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Bar slot for the codexbar Omarchy shell plugin. Compact by design: the
@@ -119,7 +120,7 @@ BarWidget {
     labelVisible: false
     fixedWidth: root.vertical ? -1 : contentRow.implicitWidth + button.scaledHorizontalMargin * 2
     foreground: root.panelItem ? root.panelItem.barColor
-                               : (root.bar ? root.bar.barForeground : Color.foreground)
+                               : (root.bar ? root.bar.barForeground : Commons.Color.foreground)
     // Normally suppressed — the panel is the detail view. Two exceptions: the
     // alarm dot — a mark you can't interpret is worse than no mark, so
     // hovering names the window that is actually spent — and the stale mark,
@@ -199,7 +200,7 @@ BarWidget {
           height: width
           radius: width / 2
           color: root.panelItem ? root.panelItem.criticalDotColor
-                                : (root.bar ? root.bar.urgent : Color.urgent)
+                                : (root.bar ? root.bar.urgent : Commons.Color.urgent)
         }
       }
     }

@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Detail panel for the codexbar Omarchy shell plugin. Owns the data: polls
@@ -30,8 +31,8 @@ Panel {
   // reference for a card, and a theme that defines popups.text separately would
   // be ignored outright. (printbar already did this; the rest of the family now
   // agrees.)
-  readonly property color foreground: Color.popups.text
-  readonly property color urgent: bar ? bar.urgent : Color.urgent
+  readonly property color foreground: Commons.Color.popups.text
+  readonly property color urgent: bar ? bar.urgent : Commons.Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.55)
 
   // ---- Freshness suffix tint, shared by the whole family. The timestamp is
@@ -39,9 +40,9 @@ Panel {
   // "· stale (…)" suffix carries a muted warning tone, never full urgent. Text
   // stays the primary carrier, so a monochrome panel loses nothing.
   readonly property color freshnessWarn: !panelColored ? dim : mix(dim, urgent, 0.4)
-  readonly property color track: Style.selectedFillFor(foreground, Color.accent, urgent)
+  readonly property color track: Style.selectedFillFor(foreground, Commons.Color.accent, urgent)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property color barFaceForeground: bar ? bar.barForeground : Color.foreground
+  readonly property color barFaceForeground: bar ? bar.barForeground : Commons.Color.foreground
   readonly property color barFaceDim: Qt.darker(barFaceForeground, 1.55)
 
   readonly property string binName: "codexbar"
@@ -147,10 +148,10 @@ Panel {
   // `bar.background` on a transparent bar would floor the contrast against a
   // surface nobody can see.
   readonly property color barBackdrop: {
-    var fg = bar ? bar.barForeground : Color.foreground
+    var fg = bar ? bar.barForeground : Commons.Color.foreground
     if (bar && bar.transparent)
       return relLuminance(fg) > 0.5 ? Qt.rgba(0, 0, 0, 1) : Qt.rgba(1, 1, 1, 1)
-    return bar ? bar.background : Color.background
+    return bar ? bar.background : Commons.Color.background
   }
 
   function legibleOnBar(c) { return contrastFloor(c, barBackdrop, barFaceForeground, 4.5) }
