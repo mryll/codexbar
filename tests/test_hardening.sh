@@ -279,4 +279,138 @@ command grep -qF 'KiB — refusing it' "$_qml" \
     && _no "the refusal message stopped claiming KiB" "the message still says KiB" \
     || _ok "the refusal message stopped claiming KiB"
 
+# --- argv/env spy: the credits balance and the tokens never reach a child ------
+# /proc/<pid>/cmdline is world readable, so private data never goes in an
+# argument: the credits balance, the message ranges it buys, the text that
+# shows them (tooltip, bar text, --json) and the OAuth tokens. Nor in a child's
+# environment: /proc/<pid>/environ is owner-only, but a secret still has no
+# business there, so it travels on stdin or a pipe. The stubs record their own
+# argv and environment; jq then execs the real jq so the script keeps working,
+# and curl answers with canned bodies so the whole cycle runs: the expired
+# token forces a refresh and the credentials rewrite, the missing cache forces
+# the usage fetch that brings the credits.
+SPY_ACCESS='ACCESSTOKENSENTINEL-aaa'
+SPY_REFRESH='REFRESHTOKENSENTINEL-bbb'
+SPY_IDT='IDTOKENSENTINEL-eee'
+SPY_NEW_ACCESS='NEWACCESSSENTINEL-ccc'
+SPY_NEW_REFRESH='NEWREFRESHSENTINEL-ddd'
+SPY_NEW_IDT='NEWIDTOKENSENTINEL-fff'
+SPY_REFRESH_RESP="{\"access_token\":\"h.p.$SPY_NEW_ACCESS\",\"refresh_token\":\"$SPY_NEW_REFRESH\",\"id_token\":\"h.p.$SPY_NEW_IDT\"}"
+# Amounts picked to be greppable and to collide with nothing else in a command
+# line (timestamps, percentages, palette stops).
+SPY_BALANCE='73915.4217'
+SPY_USAGE='{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":42,"reset_at":9999999999,"limit_window_seconds":18000},"secondary_window":{"used_percent":10,"reset_at":9999999999,"limit_window_seconds":604800}},"credits":{"has_credits":true,"unlimited":false,"balance":"73915.4217","approx_local_messages":[736481,736493],"approx_cloud_messages":[529173,529187]}}'
+
+_run_spy() { # _run_spy <label> [codexbar args...]
+    local label="$1" home real_jq hdr acc idt
+    shift
+    home="$(mktemp -d)" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    real_jq="$(command -v jq)" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    mkdir -p "$home/.codex" "$home/.cache/codexbar" "$home/bin" \
+        || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    SPY_CURL_ARGV="$home/curl-argv.log"; SPY_CURL_STDIN="$home/curl-stdin.log"
+    SPY_JQ_ARGV="$home/jq-argv.log"; SPY_ENV="$home/child-env.log"
+    : > "$SPY_CURL_ARGV"; : > "$SPY_CURL_STDIN"; : > "$SPY_JQ_ARGV"; : > "$SPY_ENV"
+    { printf '#!/usr/bin/env bash\n'
+      printf 'env >> %q\n' "$SPY_ENV"
+      printf 'printf "%%s " "$@" >> %q; printf "\\n" >> %q\n' "$SPY_CURL_ARGV" "$SPY_CURL_ARGV"
+      printf 'cat >> %q 2>/dev/null\n' "$SPY_CURL_STDIN"
+      printf 'if [[ "$*" == *oauth/token* ]]; then\n'
+      printf '  printf "%%s\\n200" %q\n' "$SPY_REFRESH_RESP"
+      printf 'else\n'
+      printf '  printf "%%s\\n200" %q\n' "$SPY_USAGE"
+      printf 'fi\n'
+    } > "$home/bin/curl" && chmod +x "$home/bin/curl" \
+        || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    # Tab separated: a jq filter spans lines, and one record per invocation is
+    # what makes "no sentinel anywhere in argv" a readable assertion.
+    { printf '#!/usr/bin/env bash\n'
+      printf '{ printf "%%s\\t" "$@"; printf "\\n"; } >> %q\n' "$SPY_JQ_ARGV"
+      printf 'env >> %q\n' "$SPY_ENV"
+      printf 'exec %q "$@"\n' "$real_jq"
+    } > "$home/bin/jq" && chmod +x "$home/bin/jq" \
+        || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$home/bin/notify-send" && chmod +x "$home/bin/notify-send"
+    # exp in 2001 is what makes the refresh — and with it the credentials
+    # rewrite — actually run. The sentinels sit in the JWT signature part.
+    hdr=$(printf '{"alg":"RS256"}' | _b64url)
+    acc=$(printf '{"exp":1000000000}' | _b64url)
+    idt=$(printf '{"https://api.openai.com/auth":{"chatgpt_plan_type":"plus"}}' | _b64url)
+    "$real_jq" -nc --arg at "$hdr.$acc.$SPY_ACCESS" --arg rt "$SPY_REFRESH" --arg idt "$hdr.$idt.$SPY_IDT" \
+        '{tokens:{access_token:$at,refresh_token:$rt,account_id:"a",id_token:$idt}}' \
+        > "$home/.codex/auth.json" || { echo "HARNESS SETUP FAILED" >&2; exit 1; }
+    OUT=$(HOME="$home" XDG_STATE_HOME="$home/.local/state" XDG_CACHE_HOME="$home/.cache" \
+          PATH="$home/bin:$PATH" CODEXBAR_TEST_NET_QUICK_BUDGET=0 \
+          CODEXBAR_TEST_NET_LONG_BUDGET=0 CODEXBAR_TEST_NET_RETRY_DELAY=0 \
+          timeout 30 "$SCRIPT" "$@"); RC=$?
+    [[ "$RC" -ne 124 ]] && _ok "$label: returns" || _no "$label: returns" "timed out — blocked"
+    assert_exit0 "$label: exit 0"
+    assert_json_valid "$label: valid JSON"
+    SPY_HOME="$home"
+}
+
+# _spy_check <label> <serializer-needle> <output-needle>...
+# Positive controls first — a spy that captured nothing, or a run that never
+# reached the credits, would pass every "not there" assertion below without
+# proving anything: the cycle really ran (refresh body, rewrite, both
+# transfers, the refresh token on curl's stdin), the spy saw the serializer
+# that wrote the output, and the output DOES carry the private values.
+_spy_check() {
+    local label="$1" ser="$2" n s b64 spy_jq spy_argv spy_stdin spy_env
+    shift 2
+    spy_jq=$(cat "$SPY_JQ_ARGV"); spy_argv=$(cat "$SPY_CURL_ARGV")
+    spy_stdin=$(cat "$SPY_CURL_STDIN"); spy_env=$(cat "$SPY_ENV")
+    command grep -qF 'oauth/token' <<< "$spy_argv" && command grep -qF 'wham/usage' <<< "$spy_argv" \
+        && _ok "$label: both transfers were captured" \
+        || _no "$label: both transfers were captured" "curl log: $spy_argv"
+    command grep -qF -- "$SPY_REFRESH" <<< "$spy_stdin" \
+        && _ok "$label: the refresh token DID travel, on stdin" \
+        || _no "$label: the refresh token DID travel, on stdin" "stdin log: $spy_stdin"
+    command grep -qF 'grant_type' <<< "$spy_jq" \
+        && _ok "$label: the refresh body was really built" \
+        || _no "$label: the refresh body was really built" "jq log: $spy_jq"
+    command grep -qF '.tokens.access_token=' <<< "$spy_jq" \
+        && _ok "$label: the credentials rewrite really ran" \
+        || _no "$label: the credentials rewrite really ran" "jq log: $spy_jq"
+    [[ "$(jq -r .tokens.refresh_token "$SPY_HOME/.codex/auth.json")" == "$SPY_NEW_REFRESH" ]] \
+        && _ok "$label: the new refresh token is in the FILE" \
+        || _no "$label: the new refresh token is in the FILE" "$(cat "$SPY_HOME/.codex/auth.json")"
+    command grep -qE '^HOME=' <<< "$spy_env" \
+        && _ok "$label: the children's environments were captured" \
+        || _no "$label: the children's environments were captured" "env log empty"
+    command grep -qF -- "$ser" <<< "$spy_jq" \
+        && _ok "$label: the spy saw the serializer" \
+        || _no "$label: the spy saw the serializer" "jq log: $spy_jq"
+    for n in "$@"; do
+        command grep -qF -- "$n" <<< "$OUT" \
+            && _ok "$label: output carries $n" \
+            || _no "$label: output carries $n" "output: $OUT"
+    done
+    # No secret in ANY command line, curl's or jq's — not even in the base64
+    # form jq is handed on stdin — nor in any child's environment.
+    for s in "$SPY_BALANCE" 736481 736493 529173 529187 \
+             "$SPY_ACCESS" "$SPY_REFRESH" "$SPY_IDT" \
+             "$SPY_NEW_ACCESS" "$SPY_NEW_REFRESH" "$SPY_NEW_IDT"; do
+        b64=$(printf '%s' "$s" | base64 -w0)
+        command grep -qF -e "$s" -e "$b64" <<< "$spy_jq" \
+            && _no "$label: jq argv has no $s (plain or base64)" "jq log: $spy_jq" \
+            || _ok "$label: jq argv has no $s (plain or base64)"
+        command grep -qF -e "$s" -e "$b64" <<< "$spy_argv" \
+            && _no "$label: curl argv has no $s (plain or base64)" "curl log: $spy_argv" \
+            || _ok "$label: curl argv has no $s (plain or base64)"
+        command grep -qF -- "$s" <<< "$spy_env" \
+            && _no "$label: child env has no $s" "env log: $spy_env" \
+            || _ok "$label: child env has no $s"
+    done
+    rm -rf "$SPY_HOME"
+}
+
+_run_spy "credits spy (waybar)"
+_spy_check "credits spy (waybar)" 'tooltip:$tooltip' "$SPY_BALANCE" '736481–736493' '529173–529187'
+_run_spy "credits spy (--format)" --no-color --format 'bal {credits_balance} loc {credits_local}'
+_spy_check "credits spy (--format)" 'tooltip:$tooltip' "bal $SPY_BALANCE loc 736481–736493"
+_run_spy "credits spy (--json)" --json
+_spy_check "credits spy (--json)" 'approx_local_messages' "\"balance\":$SPY_BALANCE" \
+    '"approx_local_messages":[736481,736493]' '"approx_cloud_messages":[529173,529187]'
+
 finish

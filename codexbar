@@ -665,6 +665,17 @@ pango_escape() {
     sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<< "${1:-}"
 }
 
+# Hand strings to jq on STDIN, one base64 line each, for `jq -nR '[inputs |
+# @base64d]'`. For text that may carry billing amounts: as an argument it would
+# sit in jq's /proc/<pid>/cmdline, which every local user can read. Base64 and
+# not raw text: jq 1.7 reads raw input in 4 KiB blocks and mangles a UTF-8
+# character split across two of them, while @base64d decodes the whole string
+# at once, exactly like `--arg` (invalid UTF-8 included).
+b64_lines() {  # b64_lines <string>...
+    local s
+    for s in "$@"; do printf '%s' "$s" | base64 -w0; printf '\n'; done
+}
+
 # Strip color from Pango markup while keeping everything structural: only the
 # painting attributes go, so <span font_weight='bold'> stays bold, glyphs, bar
 # fill characters, markers and box drawing are untouched, and an attribute-less
@@ -1158,10 +1169,11 @@ if [[ -n "$cred_tmp" ]]; then
     # Synchronous refresh — 25s timeout covers cold boot when DHCP is still settling.
     # Transient failures (no HTTP response) are retried until the shared deadline —
     # same policy as the usage fetch — so a cold-boot race doesn't cost a full interval.
-    # The refresh token must miss jq's argv as well: /proc/PID/cmdline is
-    # world-readable, /proc/PID/environ is owner-only.
-    refresh_body=$(CODEXBAR_RT="$refresh_token" jq -nc --arg ci "$CLIENT_ID" \
-                     '{client_id:$ci, grant_type:"refresh_token", refresh_token:env.CODEXBAR_RT, scope:"openid profile email"}')
+    # The refresh token must miss jq's argv and its environment as well, so it
+    # goes in on stdin (b64_lines: nothing checks that a token is ASCII).
+    refresh_body=$(b64_lines "$refresh_token" | jq -nRc --arg ci "$CLIENT_ID" \
+                     'input | @base64d as $rt
+                      | {client_id:$ci, grant_type:"refresh_token", refresh_token:$rt, scope:"openid profile email"}')
     # That body IS the credential, so it goes in on stdin. --data @- takes it
     # verbatim: no config grammar, so no line to inject into either. Content-Type
     # is not a secret and stays on the command line.
@@ -1199,18 +1211,23 @@ if [[ -n "$cred_tmp" ]]; then
         # not a CAS: the check-then-rename window is milliseconds.
         current=$(read_bounded "$CREDS" "$FILE_MAX_SECRET") || current=""
         if [[ "$current" == "$creds" ]] && (( $(byte_len "$current") < FILE_MAX_SECRET )); then
-            # Same argv rule for the three new token values. The jq input is
-            # the bounded copy already validated under this lock, not a fresh
-            # read of $CREDS: that bounds the read and shuts the window in
-            # which the file could be swapped for a FIFO between the check
+            # Same rule for the three new token values: not in argv, not in
+            # the environment. stdin carries $creds, so the tokens come in on
+            # a pipe instead, NUL-separated: argv shows only its /dev/fd path,
+            # and --rawfile reads the whole pipe at once, so a multibyte
+            # character is never split the way -R splits one. The jq input
+            # is the bounded copy already validated under this lock, not a
+            # fresh read of $CREDS: that bounds the read and shuts the window
+            # in which the file could be swapped for a FIFO between the check
             # and the rewrite. A failed write leaves the old file alone — the
             # in-memory token still serves this run, and exiting non-zero
             # would break the widget.
-            CODEXBAR_AT="${new_at:-$access_token}" \
-            CODEXBAR_RT="${new_rt:-$refresh_token}" \
-            CODEXBAR_IDT="${new_idt:-$id_token_raw}" \
             jq --arg lr "$now_iso" \
-               '.tokens.access_token=env.CODEXBAR_AT | .tokens.refresh_token=env.CODEXBAR_RT | .tokens.id_token=env.CODEXBAR_IDT | .last_refresh=$lr' \
+               --rawfile tokens <(printf '%s\0' "${new_at:-$access_token}" \
+                   "${new_rt:-$refresh_token}" "${new_idt:-$id_token_raw}") \
+               '($tokens | split("\u0000")) as [$at, $rt, $idt]
+                | .tokens.access_token=$at | .tokens.refresh_token=$rt | .tokens.id_token=$idt
+                | .last_refresh=$lr' \
                <<< "$creds" > "$cred_tmp" && mv "$cred_tmp" "$CREDS" \
                || rm -f "$cred_tmp" 2>/dev/null || true
         else
@@ -1509,15 +1526,18 @@ if [[ "$JSON_MODE" == "true" ]]; then
 
     # balance arrives as a string from the API extraction; numbers stay
     # numbers in the structured schema (unparseable -> 0).
-    credits_json=$(jq -nc \
-        --argjson has "$has_credits" --argjson unlimited "$credits_unlimited" \
-        --arg balance "$credits_balance" \
-        --argjson local_lo "$credits_local_lo" --argjson local_hi "$credits_local_hi" \
-        --argjson cloud_lo "$credits_cloud_lo" --argjson cloud_hi "$credits_cloud_hi" \
-        '{has_credits:$has, unlimited:$unlimited,
-          balance:(($balance | tonumber?) // 0),
-          approx_local_messages:[$local_lo,$local_hi],
-          approx_cloud_messages:[$cloud_lo,$cloud_hi]}')
+    # The credit fields reach jq on stdin (b64_lines), never as --arg: the
+    # balance, and the message ranges it buys, are private account data. The
+    # balance is the API's own string, so it is not safe to splice into JSON
+    # text. fromjson stands in for the old --argjson, so the types are unchanged.
+    credits_json=$(b64_lines "$has_credits" "$credits_unlimited" "$credits_balance" \
+            "$credits_local_lo" "$credits_local_hi" "$credits_cloud_lo" "$credits_cloud_hi" |
+        jq -nRc '[inputs | @base64d]
+          as [$has, $unlimited, $balance, $local_lo, $local_hi, $cloud_lo, $cloud_hi]
+          | {has_credits:($has | fromjson), unlimited:($unlimited | fromjson),
+             balance:(($balance | tonumber?) // 0),
+             approx_local_messages:[($local_lo | fromjson), ($local_hi | fromjson)],
+             approx_cloud_messages:[($cloud_lo | fromjson), ($cloud_hi | fromjson)]}')
 
     # Staleness / error info, mirroring the waybar tooltip footer.
     _updated_iso=""
@@ -1540,8 +1560,10 @@ if [[ "$JSON_MODE" == "true" ]]; then
         _le_code="" _le_msg=""
         { read -r _le_code || true; read -r _le_msg || true; } < <(read_bounded "$CACHE_DIR/.last_error" "$FILE_MAX_SECRET") 2>/dev/null || true
         if [[ -n "$_le_code" && "$_le_code" =~ ^[0-9]+$ && "$_le_code" != "000" ]]; then
-            _last_error_json=$(jq -nc --argjson c "$_le_code" --arg m "$_le_msg" \
-                '{http_status:$c, message:$m}')
+            # The message is the server's own free text, so it may name an
+            # amount: stdin (b64_lines), like the Waybar tooltip that shows it.
+            _last_error_json=$(b64_lines "$_le_msg" | jq -nRc --argjson c "$_le_code" \
+                'input | @base64d as $m | {http_status:$c, message:$m}')
         fi
     fi
 
@@ -1565,14 +1587,16 @@ if [[ "$JSON_MODE" == "true" ]]; then
                  {pct:$crit_at, color:$critical},
                  {pct:100, color:$critical}]}')
 
-    jq -nc \
+    # credits carries the balance and last_error the server's free text, so
+    # both come in on stdin as well. Both are already JSON.
+    printf '{"credits":%s,"last_error":%s}' "$credits_json" "$_last_error_json" |
+    jq -c \
         --arg plan "$plan" --arg state "$class" --argjson max_pct "$max_pct" \
-        --argjson windows "$windows_json" --argjson credits "$credits_json" \
+        --argjson windows "$windows_json" \
         --argjson palette "$palette_json" \
         --argjson stale "$_stale" --arg stale_reason "$_stale_reason" \
         --arg updated "$_updated_iso" --argjson age "$_age_s" \
-        --argjson last_error "$_last_error_json" \
-        '{schema_version:2, error:null, loading:false,
+        '.credits as $credits | .last_error as $last_error | {schema_version:2, error:null, loading:false,
           plan:$plan, state:$state, max_pct:$max_pct,
           windows:$windows, credits:$credits, palette:$palette,
           stale:$stale,
@@ -1965,5 +1989,8 @@ fi
 [[ "$COLOR_TOOLTIP" == "true" ]] || t=$(printf '%s' "$t" | decolor)
 
 # --- Output waybar JSON ---
-jq -nc --arg text "$bar_text" --arg tooltip "$t" --arg class "$class" \
-    '{text:$text, tooltip:$tooltip, class:$class}'
+# Text and tooltip go to jq on stdin (b64_lines), not as `--arg`: both can show
+# the credits balance — the tooltip section, the {credits_*} placeholders.
+b64_lines "$bar_text" "$t" |
+    jq -nRc --arg class "$class" \
+        '[inputs | @base64d] as [$text, $tooltip] | {text:$text, tooltip:$tooltip, class:$class}'
